@@ -1,7 +1,7 @@
 import { Button, Popover, Tooltip } from '@mui/material';
 import React from 'react';
 import { t } from '../i18n';
-import { LINK_STYLE } from './LinkLayer';
+import { LINK_STYLE, writeArrow } from './LinkLayer';
 
 /** One sample line, drawn like the real ones (LinkLayer) */
 function Sample(props: {
@@ -10,6 +10,8 @@ function Sample(props: {
     dash?: string;
     opacity?: number;
     count?: number;
+    /** arrow head at the left end - write line (AM-12) */
+    arrow?: boolean;
 }): React.JSX.Element {
     const d = 'M 2 17 C 30 17, 30 7, 58 7';
     return (
@@ -26,6 +28,12 @@ function Sample(props: {
                 opacity={props.opacity ?? 1}
                 fill="none"
             />
+            {props.arrow && (
+                <path
+                    d={writeArrow(17)}
+                    fill={props.color}
+                />
+            )}
             {props.count && (
                 <text
                     x={30}
@@ -45,8 +53,9 @@ function Sample(props: {
  *
  * @param props - component props
  * @param props.dark - dark theme (the popover is outside the app element)
+ * @param props.hideOthers - lines not belonging to the selected row are hidden (switch in the middle, ME-14)
  */
-export function LinkLegend(props: { dark: boolean }): React.JSX.Element {
+export function LinkLegend(props: { dark: boolean; hideOthers: boolean }): React.JSX.Element {
     const [anchor, setAnchor] = React.useState<HTMLElement | null>(null);
     const c = LINK_STYLE.colors;
     const lines: [React.JSX.Element, string][] = [
@@ -61,6 +70,14 @@ export function LinkLegend(props: { dark: boolean }): React.JSX.Element {
             t('lgExisting'),
         ],
         [<Sample color={LINK_STYLE.done} />, t('lgDone')],
+        [
+            <Sample
+                color={c.ok}
+                dash={LINK_STYLE.dashWrite}
+                arrow
+            />,
+            t('lgWriteLine'),
+        ],
         [
             <Sample
                 color={c.ok}
@@ -87,7 +104,7 @@ export function LinkLegend(props: { dark: boolean }): React.JSX.Element {
                     opacity={LINK_STYLE.faded}
                 />
             </span>,
-            t('lgFocus'),
+            props.hideOthers ? t('lgFocusHide') : t('lgFocus'),
         ],
         [
             <Sample
@@ -149,6 +166,7 @@ export function LinkLegend(props: { dark: boolean }): React.JSX.Element {
                         <li>{t('lgUseNodes')}</li>
                         <li>{t('lgUseSeveral')}</li>
                         <li>{t('lgUseClick')}</li>
+                        <li>{t('lgUseLinkAs')}</li>
                         <li>{t('lgUseImport')}</li>
                     </ul>
                     <h4>{t('lgMarks')}</h4>

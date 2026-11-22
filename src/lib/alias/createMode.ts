@@ -48,6 +48,29 @@ export function validateBasePath(basePath: string): Message[] {
     return errors;
 }
 
+/**
+ * The object has adapter settings: `common.custom` with at least one instance entry (history, influxdb, …),
+ * also a switched-off one - its settings and history are still worth migrating
+ *
+ * @param obj - object
+ */
+export function hasAdapterSettings(obj: { common?: unknown } | null | undefined): boolean {
+    const custom = (obj?.common as { custom?: unknown } | undefined)?.custom;
+    return !!custom && typeof custom === 'object' && Object.values(custom).some(v => !!v && typeof v === 'object');
+}
+
+/**
+ * Sources of the mirrored states that have adapter settings - the create mode can link only these (EM-14)
+ *
+ * @param drafts - mirrored drafts
+ * @param objects - source objects
+ */
+export function sourcesWithSettings(drafts: DraftObject[], objects: Record<string, ioBroker.Object>): string[] {
+    return drafts
+        .filter(d => d.type === 'state' && d.sourceId && hasAdapterSettings(objects[d.sourceId]))
+        .map(d => d.sourceId!);
+}
+
 /** Attributes of a source state that are mirrored to the alias state */
 const MIRRORED_STATE_COMMON = [
     'name',

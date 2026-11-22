@@ -7,8 +7,13 @@ import {
     DialogContent,
     DialogContentText,
     DialogTitle,
+    FormControl,
     FormControlLabel,
+    FormHelperText,
+    FormLabel,
     LinearProgress,
+    Radio,
+    RadioGroup,
     TextField,
 } from '@mui/material';
 import React from 'react';
@@ -16,6 +21,7 @@ import { validateBasePath } from '../../../src/lib/alias/createMode';
 import type { CheckResult } from '../../../src/lib/migration/types';
 import { formatMessage, type Message } from '../../../src/lib/messages';
 import { language, t } from '../i18n';
+import type { MirrorLinks } from '../model';
 import { CustomIcons, type InstanceInfo } from './ObjectTree';
 
 function formatDuration(ms: number): string {
@@ -435,8 +441,12 @@ export function CheckDialog(props: {
     );
 }
 
+const MIRROR_LINKS_KEY = 'objectmigrator.mirrorLinks';
+const MIRROR_LINKS: MirrorLinks[] = ['all', 'settings', 'none'];
+
 /**
- * Base path of the create mode (EM-01)
+ * Base path of the create mode (EM-01) and which mirrored values are linked (EM-14) - the last choice
+ * is remembered per browser
  *
  * @param props
  * @param props.defaultPath
@@ -452,11 +462,30 @@ export function CreateModeDialog(props: {
     /** Objects selected in the source tree */
     selection: string[];
     error?: string;
-    onMirror: (basePath: string, sourceRoot: string, onlySourceIds?: string[]) => void;
+    onMirror: (basePath: string, sourceRoot: string, onlySourceIds: string[] | undefined, links: MirrorLinks) => void;
     onClose: () => void;
 }): React.JSX.Element {
     const [path, setPath] = React.useState(props.defaultPath);
     const [onlySelected, setOnlySelected] = React.useState(props.selection.length > 0);
+    const [links, setLinks] = React.useState<MirrorLinks>(() => {
+        try {
+            const stored = window.localStorage.getItem(MIRROR_LINKS_KEY) as MirrorLinks;
+            if (MIRROR_LINKS.includes(stored)) {
+                return stored;
+            }
+        } catch {
+            // default
+        }
+        return 'all';
+    });
+    const chooseLinks = (value: MirrorLinks): void => {
+        setLinks(value);
+        try {
+            window.localStorage.setItem(MIRROR_LINKS_KEY, value);
+        } catch {
+            // only not remembered
+        }
+    };
     const errors = validateBasePath(path);
     const root = props.sourceRoot;
     return (
@@ -490,6 +519,34 @@ export function CreateModeDialog(props: {
                         label={t('mirrorSelection', { n: props.selection.length })}
                     />
                 )}
+                <FormControl
+                    fullWidth
+                    margin="normal"
+                >
+                    <FormLabel id="om-mirror-links">{t('mirrorLinks')}</FormLabel>
+                    <RadioGroup
+                        aria-labelledby="om-mirror-links"
+                        value={links}
+                        onChange={e => chooseLinks(e.target.value as MirrorLinks)}
+                    >
+                        <FormControlLabel
+                            value="all"
+                            control={<Radio size="small" />}
+                            label={t('mirrorLinksAll')}
+                        />
+                        <FormControlLabel
+                            value="settings"
+                            control={<Radio size="small" />}
+                            label={t('mirrorLinksSettings')}
+                        />
+                        <FormControlLabel
+                            value="none"
+                            control={<Radio size="small" />}
+                            label={t('mirrorLinksNone')}
+                        />
+                    </RadioGroup>
+                    {links !== 'all' && <FormHelperText>{t('mirrorLinksHelp')}</FormHelperText>}
+                </FormControl>
                 {props.error && <Alert severity="error">{props.error}</Alert>}
             </DialogContent>
             <DialogActions>
@@ -497,7 +554,7 @@ export function CreateModeDialog(props: {
                 <Button
                     variant="contained"
                     disabled={errors.length > 0}
-                    onClick={() => props.onMirror(path, root, onlySelected ? props.selection : undefined)}
+                    onClick={() => props.onMirror(path, root, onlySelected ? props.selection : undefined, links)}
                 >
                     {t('mirror')}
                 </Button>

@@ -5,7 +5,7 @@
  * opened and loads it again on the way back. The state is written to the sessionStorage when the page
  * is left (pagehide) and restored on the next start - in the same browser tab only.
  */
-import type { EditorState, Link } from './model';
+import type { EditorState, LineRef } from './model';
 
 /** State of one tree */
 export interface TreeSession {
@@ -40,7 +40,7 @@ export interface TabSession {
     /** Selected row */
     selected?: { side: 'source' | 'target'; id: string };
     /** Selected link line */
-    selectedLink?: Link;
+    selectedLink?: LineRef;
     /** Source state for the "link" button */
     pickedSource?: string;
     /** Multi selection in the source tree */

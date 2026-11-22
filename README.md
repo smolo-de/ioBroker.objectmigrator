@@ -46,8 +46,11 @@ this adapter is for the **migration**.
 Admin → tab **"Object Migrator"**:
 
 1. Left: choose the root of the source (adapter instance or any node).
-2. Right: **Create mode** → base path (e.g. `alias.0.devices.thermostat`) → **Mirror**.
-3. Link the new adapter: drag a node onto a node (matched by path/name) or a state onto a state.
+2. Right: **Create mode** → base path (e.g. `alias.0.devices.thermostat`) → choose what to link (every
+   mirrored value, only values with adapter settings, or none) → **Mirror**.
+3. Link the new adapter: drag a node onto a node (matched by path/name) or a state onto a state. The
+   choice above the lines decides whether dragging onto an alias sets the read state (default), the
+   write state (`alias.id = { read, write }`), or asks each time.
 4. Adjust on the right (rename, remove, conversion, settings), preview the history (📈).
 5. **Check** → **Write**. Every run can be rolled back in **History of runs**.
 

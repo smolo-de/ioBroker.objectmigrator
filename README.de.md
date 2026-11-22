@@ -50,9 +50,11 @@ dieser Adapter ist für die **Migration** da.
 Admin → Tab **„Objekt-Migrator“**:
 
 1. Links: die Wurzel der Quelle wählen (Adapter-Instanz, beliebiger Knoten oder „Alle Objekte“).
-2. Rechts: **Erstellungsmodus** → Basispfad (z. B. `alias.0.Geraete.Thermostat`) → **Spiegeln**.
+2. Rechts: **Erstellungsmodus** → Basispfad (z. B. `alias.0.Geraete.Thermostat`) → wählen, was verknüpft
+   wird (jeder gespiegelte Wert, nur Werte mit Adapter-Einstellungen oder keiner) → **Spiegeln**.
 3. Den neuen Adapter verknüpfen: Knoten auf Knoten ziehen (Zuordnung nach Pfad/Name) oder Datenpunkt
-   auf Datenpunkt.
+   auf Datenpunkt. Die Auswahl über den Linien legt fest, ob das Ziehen auf einen Alias
+   den Read State (Standard) oder den Write State (`alias.id = { read, write }`) setzt oder jedes Mal fragt.
 4. Rechts anpassen (umbenennen, entfernen, Umrechnung, Einstellungen), Historie ansehen (📈).
 5. **Prüfen** → **Schreiben**. Jeder Lauf lässt sich im **Verlauf** zurücknehmen.
 

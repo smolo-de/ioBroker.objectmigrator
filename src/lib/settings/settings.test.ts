@@ -70,6 +70,16 @@ describe('settings/planSettings', () => {
         });
         expect(plan.warnings.some(w => w.code === 'doubleLogging')).to.equal(true);
         expect(plan.warnings.some(w => w.code === 'lovelaceDuplicate')).to.equal(true);
+        // another entity name at the target: no duplicate
+        const renamed = planSettings(
+            source({
+                'lovelace.0': { enabled: true, entity: 'sensor', name: 'wohnzimmer_ventil' },
+            }),
+            undefined,
+            { ...instances },
+            { overrides: { 'lovelace.0': { name: 'wohnzimmer_ventil_neu' } } },
+        );
+        expect(renamed.warnings.some(w => w.code === 'lovelaceDuplicate')).to.equal(false);
     });
 
     it('sourceMode disable / remove change the source', () => {

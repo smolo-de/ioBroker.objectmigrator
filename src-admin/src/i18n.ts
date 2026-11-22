@@ -63,7 +63,39 @@ const de = {
     lgDone: 'Geschrieben – im letzten Lauf erledigt',
     lgOutside: 'Ein Ende liegt außerhalb des sichtbaren Bereichs – dorthin scrollen',
     lgBundle: 'Gebündelt: mehrere Verknüpfungen enden an einem zugeklappten Knoten, die Zahl sagt wie viele',
-    lgFocus: 'Gehört zur ausgewählten Zeile – die übrigen Linien werden blasser',
+    lgFocus:
+        'Gehört zur ausgewählten Zeile (bei einem Knoten: zu den Werten darunter) – die übrigen Linien werden blasser. Esc oder ein zweiter Klick auf die Zeile hebt die Auswahl auf',
+    lgFocusHide:
+        'Gehört zur ausgewählten Zeile (bei einem Knoten: zu den Werten darunter) – die übrigen Linien sind ausgeblendet. Esc oder ein zweiter Klick auf die Zeile hebt die Auswahl auf',
+    lgAllLinks:
+        'An: bei einer Auswahl bleiben alle Linien zu sehen, die übrigen werden nur blasser – aus: nur die Linien der Auswahl',
+    allLinksShort: 'Alle Verbindungen',
+    linkModeHelp:
+        'Was das Ziehen einer Quelle auf einen Alias setzt: den Read State (alias.id, Standard), den Write State (alias.id.write – der Alias liest weiter von seinem Read State und schreibt dorthin) oder eine individuelle Entscheidung bei jedem Ziehen',
+    linkModeRead: 'Read State',
+    linkModeWrite: 'Write State',
+    linkModeAsk: 'Individuell',
+    linkModeReadLong: 'Read-State-Modus',
+    linkModeWriteLong: 'Write-State-Modus',
+    linkModeAskLong: 'Individuelle Entscheidung',
+    linkAsTitle: 'Read State oder Write State?',
+    linkAsMany: '{n} Verknüpfungen – die Auswahl gilt für alle',
+    linkAsRead: 'Als Alias-Read-State setzen',
+    linkAsWrite: 'Als Alias-Write-State setzen',
+    linkedRead: '{n} als Quelle verknüpft',
+    linkedWrite: '{n} als Write State gesetzt',
+    linkedWritePending: '{n} als Write State gesetzt – Read State fehlt noch',
+    linkSkipped: '{n} übersprungen – das Objekt ist schon der Read State',
+    writeIdPending: 'Read State fehlt noch – der Write State gilt für den nächsten, der verknüpft wird',
+    writeIdRemoveShort: 'Write State entfernen',
+    lgUseLinkAs:
+        'Über den Linien „↔“: ob das Ziehen auf einen Alias den Read State oder den Write State setzt oder jedes Mal gefragt wird. Den Write State kann man auch im Panel setzen; seine Linie lässt sich anklicken und mit Entf entfernen.',
+    writeIdLabel: 'Schreib-ID',
+    writeIdSet: 'Schreib-ID setzen',
+    writeIdRemove: 'Schreib-ID entfernen – der Alias schreibt auf die Lese-Quelle',
+    lgWriteLine:
+        'Schreib-ID: Der Alias liest von einer anderen Quelle und schreibt auf dieses Objekt (Pfeil), z. B. bei getrennten IDs für Lesen und Schreiben',
+    lgWrite: 'Schreib-ID',
     lgSelected: 'Ausgewählte Linie – Entf löst die Verknüpfung',
     lgUse: 'Bedienung',
     lgUseDrag:
@@ -74,7 +106,7 @@ const de = {
         'Mehrere Quellen an einem Ziel (Adapterwechsel): die zuletzt verknüpfte liefert künftig den Wert (alias.id), die Historie aller wird übernommen.',
     lgUseClick: 'Klick auf eine Linie wählt sie aus; das Panel zeigt das Ziel mit allen Quellen und der Umrechnung.',
     lgUseImport:
-        'Bestehende Aliase: rechts über den Knoten fahren → „⇠ einlesen“. Die Quellen werden links aufgeklappt.',
+        'Bestehende Aliase: ⇠ in der Zeile rechts liest die Zuordnungen ein, ↶ nimmt das Einlesen zurück. Die Quellen werden links aufgeklappt.',
     lgMarks: 'Markierungen in den Bäumen',
     lgAnchor: 'Punkt am Rand: verknüpft (grün) oder nicht verknüpft',
     lgCount: 'Anzahl der Verknüpfungen unter einem zugeklappten Knoten',
@@ -186,6 +218,14 @@ const de = {
     importedChip: 'eingelesen',
     aliasPointsTo: 'zeigt auf',
     aliasWriteTo: 'schreibt auf',
+    writeIdHelp:
+        'Getrennte IDs für Lesen und Schreiben: Der Alias liest von der Quelle oben und schreibt auf dieses Objekt. Die Schreib-ID bleibt, solange diese Quelle live ist',
+    writesHere: 'schreibt hierher (Schreib-ID)',
+    unimport: 'Einlesen zurücknehmen',
+    unimportHelp:
+        'Nimmt die eingelesenen Zuordnungen hier und darunter wieder aus dem Plan. Seitdem geänderte bleiben (Linie auswählen, Entf löst sie)',
+    unimported: '{n} eingelesene Zuordnungen zurückgenommen',
+    unimportKept: '{n} seitdem geändert – bleiben im Plan',
     upLevel: 'eine Ebene hoch',
     newValue: 'Neuer Wert',
     newDevice: 'Neues Gerät',
@@ -221,7 +261,23 @@ const de = {
     fromSource: 'von der Quelle',
     manualSource: 'Quelle (ID) eingeben',
     selected: '{n} markiert',
+    openCustoms: 'Original-Einstellungen',
+    openCustomsTab: 'in neuem Tab',
+    openCustomsReload:
+        'Änderungen hier speichert der Admin direkt. Danach den Editor neu laden (F5), damit er sie sieht.',
+    openCustomsHelp:
+        'Öffnet die Adapter-Einstellungen dieses Objekts aus dem ioBroker-Admin in einem Fenster über dem Editor; Strg-Klick: in einem neuen Browser-Tab',
+    moveSkipped: '{n} nicht verschoben – der Name ist am Ziel schon vergeben (vorher umbenennen)',
+    targetSelectionHelp:
+        'Strg-/Shift-Klick markiert mehrere Zeilen. Entf entfernt die markierten neuen Objekte, Ziehen auf einen Knoten verschiebt sie',
     mirrorSelection: 'nur die markierten Objekte spiegeln ({n})',
+    mirrorLinks: 'Verknüpfen',
+    mirrorLinksAll: 'jeden gespiegelten Wert mit seiner Quelle',
+    mirrorLinksSettings: 'nur Werte mit Adapter-Einstellungen (Historie, influxdb, lovelace …)',
+    mirrorLinksNone: 'keine – nur die Struktur spiegeln',
+    mirrorLinksHelp:
+        'Die übrigen Werte entstehen ohne Quelle. Den neuen Adapter danach per Ziehen verknüpfen (Knoten auf Knoten ordnet nach Pfad/Name zu)',
+    mirrored: '{n} Werte gespiegelt, {links} davon verknüpft',
     noForm: 'Kein Formular – Einstellungen als JSON',
     noSourceYet: 'Noch keine Quelle: links einen State hierher ziehen oder eine ID eingeben.',
     object: 'Objekt',
@@ -392,7 +448,39 @@ const en: Texts = {
     lgDone: 'Written – done by the last run',
     lgOutside: 'One end is outside the visible area – scroll there',
     lgBundle: 'Bundled: several links end at a collapsed node, the number says how many',
-    lgFocus: 'Belongs to the selected row – the other lines are faded',
+    lgFocus:
+        'Belongs to the selected row (for a node: to the values below it) – the other lines are faded. Esc or a second click on the row clears the selection',
+    lgFocusHide:
+        'Belongs to the selected row (for a node: to the values below it) – the other lines are hidden. Esc or a second click on the row clears the selection',
+    lgAllLinks:
+        'On: with a selection all lines stay visible, the others are only faded – off: only the lines of the selection',
+    allLinksShort: 'All connections',
+    linkModeHelp:
+        'What dragging a source onto an alias sets: the read state (alias.id, default), the write state (alias.id.write – the alias keeps reading from its read state and writes there) or an individual decision on every drag',
+    linkModeRead: 'Read state',
+    linkModeWrite: 'Write state',
+    linkModeAsk: 'Individual',
+    linkModeReadLong: 'Read state mode',
+    linkModeWriteLong: 'Write state mode',
+    linkModeAskLong: 'Individual decision',
+    linkAsTitle: 'Read state or write state?',
+    linkAsMany: '{n} links – the choice applies to all',
+    linkAsRead: 'Set as alias read state',
+    linkAsWrite: 'Set as alias write state',
+    linkedRead: '{n} linked as source',
+    linkedWrite: '{n} set as write state',
+    linkedWritePending: '{n} set as write state – read state still missing',
+    linkSkipped: '{n} skipped – the object is the read state already',
+    writeIdPending: 'Read state still missing – the write state applies to the next one linked',
+    writeIdRemoveShort: 'Remove write state',
+    lgUseLinkAs:
+        'Above the lines "↔": whether dragging onto an alias sets the read state or the write state, or asks each time. The write state can also be set in the panel; its line can be clicked and removed with Del.',
+    writeIdLabel: 'write ID',
+    writeIdSet: 'set write ID',
+    writeIdRemove: 'remove the write ID – the alias writes to the read source',
+    lgWriteLine:
+        'Write ID: the alias reads from another source and writes to this object (arrow), e.g. with separate IDs for reading and writing',
+    lgWrite: 'write ID',
     lgSelected: 'Selected line – Del removes the link',
     lgUse: 'How to',
     lgUseDrag:
@@ -402,7 +490,8 @@ const en: Texts = {
     lgUseSeveral:
         'Several sources at one target (adapter switch): the last linked one delivers the value from now on (alias.id), the history of all is taken over.',
     lgUseClick: 'Clicking a line selects it; the panel shows the target with all sources and the conversion.',
-    lgUseImport: 'Existing aliases: hover the node on the right → "⇠ read in". The sources are expanded on the left.',
+    lgUseImport:
+        'Existing aliases: ⇠ in the row on the right reads the mappings in, ↶ takes the read-in back. The sources are expanded on the left.',
     lgMarks: 'Marks in the trees',
     lgAnchor: 'Dot at the edge: linked (green) or not linked',
     lgCount: 'Number of links below a collapsed node',
@@ -513,6 +602,14 @@ const en: Texts = {
     importedChip: 'read in',
     aliasPointsTo: 'points to',
     aliasWriteTo: 'writes to',
+    writeIdHelp:
+        'Separate IDs for reading and writing: the alias reads from the source above and writes to this object. The write ID stays as long as this source is live',
+    writesHere: 'writes here (write ID)',
+    unimport: 'Undo read-in',
+    unimportHelp:
+        'Takes the read-in mappings here and below out of the plan again. Ones changed since stay (select the line, Del removes it)',
+    unimported: '{n} read-in mappings taken back',
+    unimportKept: '{n} changed since – they stay in the plan',
     upLevel: 'one level up',
     newValue: 'New value',
     newDevice: 'New device',
@@ -548,7 +645,22 @@ const en: Texts = {
     fromSource: 'from the source',
     manualSource: 'Enter source (ID)',
     selected: '{n} selected',
+    openCustoms: 'Original settings',
+    openCustomsTab: 'in a new tab',
+    openCustomsReload: 'The admin saves changes made here directly. Reload the editor afterwards (F5) so it sees them.',
+    openCustomsHelp:
+        'Opens the adapter settings of this object from the ioBroker admin in a window over the editor; Ctrl-click: in a new browser tab',
+    moveSkipped: '{n} not moved – the name exists at the target already (rename first)',
+    targetSelectionHelp:
+        'Ctrl/Shift-click selects several rows. Del removes the selected new objects, dragging onto a node moves them',
     mirrorSelection: 'mirror only the selected objects ({n})',
+    mirrorLinks: 'Link',
+    mirrorLinksAll: 'every mirrored value with its source',
+    mirrorLinksSettings: 'only values with adapter settings (history, influxdb, lovelace …)',
+    mirrorLinksNone: 'none – mirror the structure only',
+    mirrorLinksHelp:
+        'The other values are created without a source. Link the new adapter afterwards by dragging (node onto node matches by path/name)',
+    mirrored: '{n} values mirrored, {links} of them linked',
     noForm: 'No form – settings as JSON',
     noSourceYet: 'No source yet: drag a state from the left here or enter an ID.',
     object: 'Object',

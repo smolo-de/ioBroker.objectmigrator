@@ -4,7 +4,7 @@
  */
 import { converterToAlias, isConverting, type ValueConverter } from '../../src/lib/alias/converter';
 import type { DraftObject } from '../../src/lib/alias/createMode';
-import { normalizeIdPart } from '../../src/lib/alias/createMode';
+import { hasAdapterSettings, normalizeIdPart } from '../../src/lib/alias/createMode';
 import type { OverlapRule, TransferTask } from '../../src/lib/history/types';
 import type { AliasId, AliasUpdate, MigrationPlan, SettingsMapping } from '../../src/lib/migration/types';
 import type { SourceMode } from '../../src/lib/settings/settings';
@@ -32,6 +32,12 @@ export interface Link {
     sourceId: string;
     /** Target state */
     targetId: string;
+}
+
+/** A selected line: a link, or the write ID of an alias (AM-12) */
+export interface LineRef extends Link {
+    /** the write ID line - `sourceId` is the object the alias writes to */
+    write?: boolean;
 }
 
 /** Options of one target - edited in the properties panel (ME-15) */
@@ -63,7 +69,16 @@ export interface TargetOptions {
      * source - kept as long as the read source stays the live source
      */
     imported?: { read: string; write?: string };
+    /**
+     * Separate write ID set in the editor (AM-12), for the read source `read`: the alias reads from it and
+     * writes to `id`; null = none (also not the read-in one). Another live source: it does not apply.
+     * `read` empty: set before the alias had a read source - it belongs to the next one linked.
+     */
+    writeId?: { read: string; id: string | null };
 }
+
+/** What dragging a source onto an alias does (ME-21): read source, write ID, or ask each time */
+export type LinkAs = 'read' | 'write' | 'ask';
 
 /** Everything the editor defines - saved as draft, nothing is written before "Schreiben" */
 export interface EditorState {
@@ -312,7 +327,7 @@ export function anchorRow(id: string, index: Map<string, number>): number | unde
  * @param node - tree node
  */
 export function hasSettings(node: TreeNode): boolean {
-    return node.type === 'state' && Object.keys(node.obj?.common?.custom ?? {}).length > 0;
+    return node.type === 'state' && hasAdapterSettings(node.obj);
 }
 
 // ------------------------------------------------------------------ links
@@ -333,7 +348,13 @@ export function addLink(state: EditorState, sourceId: string, targetId: string):
     for (const old of state.links.filter(l => l.sourceId === sourceId)) {
         next = removeLink(next, old);
     }
-    return { ...next, links: [...next.links, { sourceId, targetId }] };
+    next = { ...next, links: [...next.links, { sourceId, targetId }] };
+    // a write ID set before the read source belongs to this one (ME-21)
+    const pending = next.options[targetId]?.writeId;
+    if (pending && !pending.read) {
+        next = setOptions(next, targetId, { writeId: { read: sourceId, id: pending.id } });
+    }
+    return next;
 }
 
 /**
@@ -509,6 +530,10 @@ export function moveDraft(state: EditorState, oldId: string, newId: string): Edi
     if (oldId === newId || isBelow(newId, oldId)) {
         return state;
     }
+    // the place is taken by another new object: no move, IDs must stay unique
+    if (state.drafts.some(d => d.id === newId && !isBelow(d.id, oldId))) {
+        return state;
+    }
     const map = (id: string): string => (isBelow(id, oldId) ? newId + id.slice(oldId.length) : id);
     const options: Record<string, TargetOptions> = {};
     for (const [key, value] of Object.entries(state.options)) {
@@ -579,18 +604,22 @@ export function addNode(
     return { ...state, drafts: [...state.drafts, { id, type, common: { name }, native: {} }] };
 }
 
+/** Which mirrored values the create mode links to their source (EM-14) */
+export type MirrorLinks = 'all' | 'settings' | 'none';
+
 /**
  * Takes over the drafts of `mirror.preview` (EM-02) - drafts with the same ID are replaced,
- * every mirrored state is linked to its source
+ * every mirrored state is linked to its source, or only the given sources (EM-14)
  *
  * @param state - editor state
  * @param drafts - mirrored drafts
+ * @param linkOnly - link only the states of these sources; undefined = all
  */
-export function applyMirror(state: EditorState, drafts: DraftObject[]): EditorState {
+export function applyMirror(state: EditorState, drafts: DraftObject[], linkOnly?: Set<string>): EditorState {
     const ids = new Set(drafts.map(d => d.id));
     let next: EditorState = { ...state, drafts: [...state.drafts.filter(d => !ids.has(d.id)), ...drafts] };
     for (const draft of drafts) {
-        if (draft.type === 'state' && draft.sourceId) {
+        if (draft.type === 'state' && draft.sourceId && (!linkOnly || linkOnly.has(draft.sourceId))) {
             next = addLink(next, draft.sourceId, draft.id);
         }
     }
@@ -647,17 +676,150 @@ export function aliasOf(
     targetId: string,
     writeable: boolean,
 ): { id: AliasId; read?: string; write?: string } | undefined {
-    const sources = sourcesOf(state, targetId);
-    const opts = state.options[targetId] ?? {};
-    const live = opts.liveSource && sources.includes(opts.liveSource) ? opts.liveSource : sources.at(-1);
+    const live = liveSourceOf(state, targetId);
     if (!live) {
         return undefined;
     }
     const fns = converterToAlias(converterOf(state, targetId, live), writeable);
-    // read in with a separate write ID: it stays as long as the read source is the live source
-    const write = opts.imported?.read === live ? opts.imported.write : undefined;
-    const id: AliasId = write && write !== live ? { read: live, write } : live;
+    const write = writeIdOf(state, targetId);
+    const id: AliasId = write ? { read: live, write } : live;
     return { id, ...(fns.read ? { read: fns.read } : {}), ...(fns.write ? { write: fns.write } : {}) };
+}
+
+/**
+ * Live source of a target: the chosen one, otherwise the last linked (the new adapter)
+ *
+ * @param state - editor state
+ * @param targetId - target
+ */
+export function liveSourceOf(state: EditorState, targetId: string): string | undefined {
+    const sources = sourcesOf(state, targetId);
+    const chosen = state.options[targetId]?.liveSource;
+    return chosen && sources.includes(chosen) ? chosen : sources.at(-1);
+}
+
+/**
+ * Separate write ID of a target (AM-12): set in the editor, or read in from `alias.id: { read, write }` -
+ * the read-in one stays as long as the read source is the live source. Without a read source none.
+ *
+ * @param state - editor state
+ * @param targetId - target
+ */
+export function writeIdOf(state: EditorState, targetId: string): string | undefined {
+    const opts = state.options[targetId];
+    const live = liveSourceOf(state, targetId);
+    if (!live) {
+        // set before the read source (ME-21) - shown, applied with the next read source
+        return opts?.writeId && !opts.writeId.read ? (opts.writeId.id ?? undefined) : undefined;
+    }
+    if (opts?.writeId?.read === live) {
+        return opts.writeId.id && opts.writeId.id !== live ? opts.writeId.id : undefined;
+    }
+    const imported = opts?.imported;
+    if (!imported?.write || imported.write === imported.read) {
+        return undefined;
+    }
+    return live === imported.read ? imported.write : undefined;
+}
+
+/**
+ * Links sources to targets as read source or as write ID (ME-21). The write ID belongs to the live
+ * read source of the alias. An existing alias that is not read in yet keeps its read source: its mapping
+ * is read in first. Without any read source the write ID waits for the next one linked (`pending`).
+ * A target that is no alias is always linked as read source; the read source itself is no write ID.
+ *
+ * @param state - editor state
+ * @param links - source → target
+ * @param as - read source or write ID
+ * @param objects - existing objects, to read in the mapping of an alias that is not read in yet
+ */
+export function linkAs(
+    state: EditorState,
+    links: Link[],
+    as: 'read' | 'write',
+    objects: Record<string, ObjInfo> = {},
+): { state: EditorState; read: number; write: number; pending: number; skipped: string[] } {
+    let next = state;
+    let read = 0;
+    let write = 0;
+    let pending = 0;
+    const skipped: string[] = [];
+    for (const l of links) {
+        if (as === 'read' || !l.targetId.startsWith('alias.')) {
+            next = addLink(next, l.sourceId, l.targetId);
+            read++;
+            continue;
+        }
+        const own = sourcesOf(next, l.targetId).length
+            ? undefined
+            : aliasReadId((objects[l.targetId]?.common?.alias as { id?: unknown } | undefined)?.id);
+        if (sourcesOf(next, l.targetId).includes(l.sourceId) || own === l.sourceId) {
+            // the read source itself
+            skipped.push(l.targetId);
+            continue;
+        }
+        if (own) {
+            // the existing alias reads from somewhere: that stays the read source
+            next = importAliases(next, { [l.targetId]: objects[l.targetId] }, l.targetId).state;
+        }
+        const live = liveSourceOf(next, l.targetId);
+        next = setOptions(next, l.targetId, { writeId: { read: live ?? '', id: l.sourceId } });
+        if (live) {
+            write++;
+        } else {
+            pending++;
+        }
+    }
+    return { state: next, read, write, pending, skipped };
+}
+
+/**
+ * Removes the write ID of an alias (AM-12) - also a read-in one; the alias writes to its read source
+ *
+ * @param state - editor state
+ * @param targetId - alias
+ */
+export function removeWriteId(state: EditorState, targetId: string): EditorState {
+    return setOptions(state, targetId, { writeId: { read: liveSourceOf(state, targetId) ?? '', id: null } });
+}
+
+/**
+ * Removes a selected line: the link, or the write ID (ME-14)
+ *
+ * @param state - editor state
+ * @param line - the line
+ */
+export function removeLine(state: EditorState, line: LineRef): EditorState {
+    return line.write ? removeWriteId(state, line.targetId) : removeLink(state, line);
+}
+
+/**
+ * Links for which "ask" (ME-21) offers a choice: onto an alias, from an object that is not its read
+ * source already (in the editor or, not read in yet, in the existing alias)
+ *
+ * @param state - editor state
+ * @param links - source → target
+ * @param objects - existing objects
+ */
+export function canWrite(state: EditorState, links: Link[], objects: Record<string, ObjInfo> = {}): boolean {
+    return links.some(
+        l =>
+            l.targetId.startsWith('alias.') &&
+            !sourcesOf(state, l.targetId).includes(l.sourceId) &&
+            (sourcesOf(state, l.targetId).length > 0 ||
+                aliasReadId((objects[l.targetId]?.common?.alias as { id?: unknown } | undefined)?.id) !== l.sourceId),
+    );
+}
+
+/**
+ * The write IDs as lines: the alias reads from its source and writes to this object (AM-12)
+ *
+ * @param state - editor state
+ */
+export function writeLinks(state: EditorState): Link[] {
+    return Object.keys(state.options)
+        .map(targetId => ({ targetId, sourceId: writeIdOf(state, targetId) }))
+        .filter((l): l is Link => !!l.sourceId);
 }
 
 /**
@@ -734,6 +896,10 @@ export function importAliases(
         if (next.links.some(l => l.sourceId === read && l.targetId === targetId)) {
             already.push(targetId);
             sources.push(read);
+            const write = writeIdOf(next, targetId);
+            if (write) {
+                sources.push(write);
+            }
             continue;
         }
         const other = next.links.find(l => l.sourceId === read);
@@ -743,6 +909,10 @@ export function importAliases(
             continue;
         }
         const writeId = alias?.id && typeof alias.id === 'object' ? (alias.id as { write?: unknown }).write : undefined;
+        if (typeof writeId === 'string' && writeId && writeId !== read) {
+            // its line needs the write object on the left too
+            sources.push(writeId);
+        }
         const formulas: ValueConverter = {};
         if (typeof alias?.read === 'string' && alias.read.trim()) {
             formulas.read = alias.read;
@@ -770,6 +940,37 @@ export function importAliases(
         next = { ...next, sourceRoot };
     }
     return { state: next, imported, already, conflicts, sources };
+}
+
+/**
+ * Takes read-in mappings back (FR-56): the read-in targets at or below a node leave the plan with their
+ * links and options, as before "einlesen". A target changed since (another source, history or settings
+ * switched on, own settings, another conversion) stays - the user's work is not discarded silently.
+ *
+ * @param state - editor state
+ * @param objects - existing objects (the read-in targets)
+ * @param nodeId - alias node (or a single alias state)
+ */
+export function removeImports(
+    state: EditorState,
+    objects: Record<string, ObjInfo>,
+    nodeId: string,
+): { state: EditorState; removed: string[]; kept: string[] } {
+    let next = state;
+    const removed: string[] = [];
+    const kept: string[] = [];
+    for (const [targetId, opts] of Object.entries(state.options)) {
+        if (!opts.imported || !isBelow(targetId, nodeId)) {
+            continue;
+        }
+        if (!isUnchangedImport(state, targetId, objects[targetId])) {
+            kept.push(targetId);
+            continue;
+        }
+        next = clearOptions(removeLink(next, { sourceId: opts.imported.read, targetId }), targetId);
+        removed.push(targetId);
+    }
+    return { state: next, removed: removed.sort(), kept: kept.sort() };
 }
 
 /**
@@ -1165,4 +1366,35 @@ export function applyTemplate(
     }
     const ids = new Set(drafts.map(d => d.id));
     return { ...state, drafts: [...state.drafts.filter(d => !ids.has(d.id)), ...drafts], options };
+}
+
+/**
+ * Adapter settings a new object gets (ME-04): those of the settings source minus the excluded ones,
+ * plus the overrides of the editor - for the icons of a draft row
+ *
+ * @param state - editor state
+ * @param targetId - target
+ * @param objectOf - existing objects
+ */
+export function plannedCustom(
+    state: EditorState,
+    targetId: string,
+    objectOf: (id: string) => ObjInfo | undefined,
+): Record<string, unknown> | undefined {
+    const opts = state.options[targetId] ?? {};
+    if (opts.settings === false) {
+        return undefined;
+    }
+    const sources = sourcesOf(state, targetId);
+    const from = opts.settingsFrom && sources.includes(opts.settingsFrom) ? opts.settingsFrom : sources[0];
+    const custom: Record<string, unknown> = {
+        ...((from ? objectOf(from)?.common?.custom : undefined) as Record<string, unknown> | undefined),
+    };
+    for (const key of opts.exclude ?? []) {
+        delete custom[key];
+    }
+    for (const [key, value] of Object.entries(opts.overrides ?? {})) {
+        custom[key] = { ...(custom[key] as Record<string, unknown> | undefined), ...value };
+    }
+    return Object.keys(custom).length ? custom : undefined;
 }

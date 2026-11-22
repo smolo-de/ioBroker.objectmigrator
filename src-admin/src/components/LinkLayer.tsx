@@ -1,6 +1,7 @@
 import React from 'react';
-import type { Compat, Link } from '../model';
+import type { Compat, LineRef, Link } from '../model';
 import { anchorRow } from '../model';
+import { t } from '../i18n';
 import { ROW_HEIGHT } from './ObjectTree';
 
 /** A link with its display data */
@@ -10,6 +11,8 @@ export interface DrawLink extends Link {
     done?: boolean;
     /** a read-in mapping that nothing changes yet (FR-56) */
     existing?: boolean;
+    /** separate write ID: the alias writes to this object, it does not read from it (AM-12) */
+    write?: boolean;
 }
 
 /** Props of the line layer */
@@ -21,10 +24,14 @@ export interface LinkLayerProps {
     rightScroll: number;
     height: number;
     width: number;
-    selected?: Link;
+    selected?: LineRef;
     /** IDs of the selected row - its lines are emphasized (ME-14) */
     focusIds: Set<string>;
-    onSelect: (link: Link) => void;
+    /** selected node (no state): the lines of the values below it belong to it */
+    focusNode?: string;
+    /** while a row is selected, the lines not belonging to it are hidden instead of faded (ME-14) */
+    hideOthers: boolean;
+    onSelect: (link: DrawLink) => void;
 }
 
 /** Line styles - shared with the legend (LinkLegend) */
@@ -37,11 +44,22 @@ export const LINK_STYLE = {
     dashExisting: '7 4',
     /** an end is outside the visible area */
     dashOutside: '4 3',
+    /** separate write ID (AM-12) - with an arrow head at the object written to */
+    dashWrite: '1.5 3',
     width: { normal: 1.6, bundle: 2.5, focus: 3, selected: 4 },
     /** other lines while a row is selected */
     faded: 0.35,
 };
 const COLORS = LINK_STYLE.colors;
+
+/**
+ * Arrow head at the source end of a write line: the alias writes there (AM-12)
+ *
+ * @param y - height of the source end
+ */
+export function writeArrow(y: number): string {
+    return `M 0 ${y} L 8 ${y - 4} L 8 ${y + 4} Z`;
+}
 
 /**
  * Bezier lines between the two trees (ME-10) - drawn in the gutter between them
@@ -52,9 +70,18 @@ export function LinkLayer(props: LinkLayerProps): React.JSX.Element {
     const { width, height } = props;
     const y = (row: number, scroll: number): number => row * ROW_HEIGHT - scroll + ROW_HEIGHT / 2;
 
+    // a selected row: its lines (for a node: the lines of the values below it) - the others are hidden
+    // or faded (ME-14)
+    const node = props.focusNode;
+    const active = props.focusIds.size > 0 || !!node;
+    const below = (id: string): boolean => !!node && (id === node || id.startsWith(`${node}.`));
+    const related = (x: Link): boolean =>
+        props.focusIds.has(x.sourceId) || props.focusIds.has(x.targetId) || below(x.sourceId) || below(x.targetId);
+    const shown = active && props.hideOthers ? props.links.filter(related) : props.links;
+
     // links of collapsed nodes end at the visible parent - bundle equal lines (ME-10)
     const bundles = new Map<string, { y1: number; y2: number; links: DrawLink[] }>();
-    for (const link of props.links) {
+    for (const link of shown) {
         const l = anchorRow(link.sourceId, props.leftIndex);
         const r = anchorRow(link.targetId, props.rightIndex);
         if (l === undefined || r === undefined) {
@@ -62,7 +89,8 @@ export function LinkLayer(props: LinkLayerProps): React.JSX.Element {
         }
         const y1 = y(l, props.leftScroll);
         const y2 = y(r, props.rightScroll);
-        const key = `${l}|${r}`;
+        // read and write lines stay apart - they look different
+        const key = `${l}|${r}|${link.write ? 'w' : 'r'}`;
         const bundle = bundles.get(key) ?? { y1, y2, links: [] };
         bundle.links.push(link);
         bundles.set(key, bundle);
@@ -89,7 +117,9 @@ export function LinkLayer(props: LinkLayerProps): React.JSX.Element {
                     : links.some(x => x.level === 'warn')
                       ? 'warn'
                       : 'ok';
+                const write = links.every(x => x.write);
                 const isSelected =
+                    !!props.selected?.write === write &&
                     links.length === 1 &&
                     props.selected?.sourceId === link.sourceId &&
                     props.selected?.targetId === link.targetId;
@@ -101,11 +131,15 @@ export function LinkLayer(props: LinkLayerProps): React.JSX.Element {
                       ? LINK_STYLE.done
                       : COLORS[level];
                 const title = links
-                    .map(x => `${x.sourceId} → ${x.targetId}${x.reason ? ` (${x.reason})` : ''}`)
+                    .map(x =>
+                        x.write
+                            ? `${x.targetId} ✎→ ${x.sourceId} (${t('lgWrite')})`
+                            : `${x.sourceId} → ${x.targetId}${x.reason ? ` (${x.reason})` : ''}`,
+                    )
                     .join('\n');
                 return (
                     <g
-                        key={`${link.sourceId}|${link.targetId}`}
+                        key={`${link.sourceId}|${link.targetId}|${write ? 'w' : 'r'}`}
                         onClick={() => props.onSelect(link)}
                         style={{ cursor: 'pointer' }}
                     >
@@ -129,11 +163,24 @@ export function LinkLayer(props: LinkLayerProps): React.JSX.Element {
                                         : LINK_STYLE.width.normal
                             }
                             strokeDasharray={
-                                outside ? LINK_STYLE.dashOutside : existing ? LINK_STYLE.dashExisting : undefined
+                                outside
+                                    ? LINK_STYLE.dashOutside
+                                    : write
+                                      ? LINK_STYLE.dashWrite
+                                      : existing
+                                        ? LINK_STYLE.dashExisting
+                                        : undefined
                             }
-                            opacity={props.focusIds.size && !focus ? LINK_STYLE.faded : 1}
+                            opacity={active && !links.some(related) ? LINK_STYLE.faded : 1}
                             fill="none"
                         />
+                        {write && (
+                            <path
+                                d={writeArrow(a)}
+                                fill={color}
+                                opacity={active && !links.some(related) ? LINK_STYLE.faded : 1}
+                            />
+                        )}
                         {links.length > 1 && (
                             <text
                                 x={width / 2}

@@ -1,5 +1,11 @@
 import { expect } from 'chai';
-import { mirrorStructure, normalizeIdPart, validateBasePath } from './createMode';
+import {
+    hasAdapterSettings,
+    mirrorStructure,
+    normalizeIdPart,
+    sourcesWithSettings,
+    validateBasePath,
+} from './createMode';
 
 const obj = (type: string, common: Record<string, unknown>): ioBroker.Object =>
     ({ type, common, native: {} }) as unknown as ioBroker.Object;
@@ -78,6 +84,17 @@ describe('alias/createMode', () => {
             'alias.0.th.OLD123.Heizung',
             'alias.0.th.OLD123.Heizung.BOOST',
         ]);
+    });
+
+    it('only values whose source has adapter settings can be linked (EM-14)', () => {
+        const drafts = mirrorStructure('hm-rpc.0', tree, 'alias.0.th');
+        expect(sourcesWithSettings(drafts, tree)).to.deep.equal(['hm-rpc.0.OLD123.Heizung.VALVE_1']);
+        // a switched-off entry still has settings and maybe history; a deleted one (null) has none
+        expect(hasAdapterSettings(obj('state', { custom: { 'history.0': { enabled: false } } }))).to.equal(true);
+        expect(hasAdapterSettings(obj('state', { custom: { 'history.0': null } }))).to.equal(false);
+        expect(hasAdapterSettings(obj('state', { custom: {} }))).to.equal(false);
+        expect(hasAdapterSettings(obj('state', {}))).to.equal(false);
+        expect(hasAdapterSettings(undefined)).to.equal(false);
     });
 
     it('a selected node is mirrored with everything below it', () => {

@@ -26,6 +26,13 @@ import {
     isUnchangedImport,
     moveDraft,
     removeDraft,
+    removeImports,
+    removeLine,
+    canWrite,
+    linkAs,
+    sourcesOf,
+    writeIdOf,
+    writeLinks,
     type DraftObject,
     type EditorState,
     type ObjInfo,
@@ -156,6 +163,17 @@ describe('admin/model', () => {
         s = removeDraft(s, 'alias.0.wp.info');
         expect(s.drafts.map(d => d.id)).to.deep.equal(['alias.0.wp', 'alias.0.wp.x']);
         expect(s.links).to.deep.equal([{ sourceId: 'lux.0.extra.x', targetId: 'alias.0.wp.x' }]);
+    });
+
+    it('applyMirror links only the given sources - the others are written without a source (EM-14)', () => {
+        const drafts = [draft('alias.0.wp.a', 'state', 'lux.0.a'), draft('alias.0.wp.b', 'state', 'lux.0.b')];
+        let s = applyMirror({ ...emptyState(), basePath: 'alias.0.wp' }, drafts, new Set(['lux.0.b']));
+        expect(s.drafts.map(d => d.id)).to.deep.equal(['alias.0.wp.a', 'alias.0.wp.b']);
+        expect(s.links).to.deep.equal([{ sourceId: 'lux.0.b', targetId: 'alias.0.wp.b' }]);
+        s = applyMirror({ ...emptyState(), basePath: 'alias.0.wp' }, drafts, new Set());
+        expect(s.links).to.deep.equal([]);
+        const written = buildPlan(s, {}).drafts?.find(d => d.id === 'alias.0.wp.a');
+        expect(written?.common.alias).to.equal(undefined);
     });
 
     it('moveDraft moves the subtree, links and options follow, missing parents become folders', () => {
@@ -455,7 +473,8 @@ describe('admin/model', () => {
             // root already shows them: unchanged
             let res = importAliases({ ...emptyState(), sourceRoot: 'old.0' }, objects, 'alias.0.dev');
             expect(res.state.sourceRoot).to.equal('old.0');
-            expect(res.sources).to.have.members(['old.0.mode', 'old.0.set_actual', 'old.0.t']);
+            // with the write ID - its line must end on the left too
+            expect(res.sources).to.have.members(['old.0.mode', 'old.0.set_actual', 'old.0.set_target', 'old.0.t']);
             // a deeper root: the common parent
             res = importAliases({ ...emptyState(), sourceRoot: 'old.0.sub' }, objects, 'alias.0.dev');
             expect(res.state.sourceRoot).to.equal('old.0');
@@ -514,6 +533,118 @@ describe('admin/model', () => {
             const s = importAliases(emptyState(), objs, 'alias.0.d').state;
             expect(isUnchangedImport(s, 'alias.0.d.same', objs['alias.0.d.same'])).to.equal(true);
             expect(buildPlan(s, objs).aliases).to.deep.equal([]);
+        });
+
+        it('the write ID is a line of its own while the read source is live (AM-12)', () => {
+            const s = importAliases(emptyState(), objects, 'alias.0.dev').state;
+            expect(writeIdOf(s, 'alias.0.dev.set')).to.equal('old.0.set_target');
+            expect(writeIdOf(s, 'alias.0.dev.temp')).to.equal(undefined);
+            expect(writeLinks(s)).to.deep.equal([{ sourceId: 'old.0.set_target', targetId: 'alias.0.dev.set' }]);
+            // another source becomes live: the write ID of the old one no longer applies
+            const moved = addLink(s, 'new.0.t', 'alias.0.dev.set');
+            expect(writeIdOf(moved, 'alias.0.dev.set')).to.equal(undefined);
+            expect(writeLinks(moved)).to.deep.equal([]);
+        });
+
+        it('reading in can be taken back - mappings changed since stay (FR-56)', () => {
+            const before: EditorState = { ...emptyState(), sourceRoot: 'old.0' };
+            const read = importAliases(before, objects, 'alias.0.dev').state;
+            // right after reading in: the plan as before
+            expect(removeImports(read, objects, 'alias.0.dev').state).to.deep.equal(before);
+            // only at and below the node
+            const one = removeImports(read, objects, 'alias.0.dev.mode');
+            expect(one.removed).to.deep.equal(['alias.0.dev.mode']);
+            expect(one.state.links.length).to.equal(2);
+            // history switched on since: it stays
+            const changed = setOptions(read, 'alias.0.dev.temp', { history: true });
+            const res = removeImports(changed, objects, 'alias.0.dev');
+            expect(res.removed).to.deep.equal(['alias.0.dev.mode', 'alias.0.dev.set']);
+            expect(res.kept).to.deep.equal(['alias.0.dev.temp']);
+            expect(res.state.links).to.deep.equal([{ sourceId: 'old.0.t', targetId: 'alias.0.dev.temp' }]);
+            expect(Object.keys(res.state.options)).to.deep.equal(['alias.0.dev.temp']);
+            expect(writeLinks(res.state)).to.deep.equal([]);
+        });
+
+        it('dragging links as read source or as write ID (ME-21)', () => {
+            let s = addLink(emptyState(), 'old.0.t', 'alias.0.dev.temp');
+            const links = [
+                // alias with a read source: write ID
+                { sourceId: 'old.0.set_target', targetId: 'alias.0.dev.temp' },
+                // existing alias, not read in: its read source stays - the mapping is read in
+                { sourceId: 'new.0.set', targetId: 'alias.0.dev.set' },
+                // the read source of the existing alias itself: no write ID
+                { sourceId: 'old.0.mode', targetId: 'alias.0.dev.mode' },
+                // alias without any read source: the write ID waits for the next one
+                { sourceId: 'new.0.empty_set', targetId: 'alias.0.dev.empty' },
+                // no alias: always a read source
+                { sourceId: 'new.0.t', targetId: 'other.0.x' },
+            ];
+            expect(canWrite(s, links, objects)).to.equal(true);
+            expect(canWrite(s, [links[2], links[4]], objects)).to.equal(false);
+            expect(canWrite(s, [{ sourceId: 'old.0.t', targetId: 'alias.0.dev.temp' }], objects)).to.equal(false);
+            const res = linkAs(s, links, 'write', objects);
+            expect(res).to.deep.include({ read: 1, write: 2, pending: 1, skipped: ['alias.0.dev.mode'] });
+            s = res.state;
+            expect(writeIdOf(s, 'alias.0.dev.temp')).to.equal('old.0.set_target');
+            expect(sourcesOf(s, 'alias.0.dev.set')).to.deep.equal(['old.0.set_actual']);
+            expect(writeIdOf(s, 'alias.0.dev.set')).to.equal('new.0.set');
+            expect(writeIdOf(s, 'alias.0.dev.empty')).to.equal('new.0.empty_set');
+            expect(writeLinks(s)).to.have.deep.members([
+                { sourceId: 'old.0.set_target', targetId: 'alias.0.dev.temp' },
+                { sourceId: 'new.0.set', targetId: 'alias.0.dev.set' },
+                { sourceId: 'new.0.empty_set', targetId: 'alias.0.dev.empty' },
+            ]);
+            const aliasId = (st: typeof s, id: string): unknown =>
+                buildPlan(st, objects).aliases?.find(a => a.targetId === id)?.alias.id;
+            expect(aliasId(s, 'alias.0.dev.temp')).to.deep.equal({ read: 'old.0.t', write: 'old.0.set_target' });
+            expect(aliasId(s, 'alias.0.dev.set')).to.deep.equal({ read: 'old.0.set_actual', write: 'new.0.set' });
+            // the waiting write ID belongs to the next read source
+            expect(aliasId(s, 'alias.0.dev.empty')).to.equal(undefined);
+            const bound = addLink(s, 'new.0.empty', 'alias.0.dev.empty');
+            expect(writeIdOf(bound, 'alias.0.dev.empty')).to.equal('new.0.empty_set');
+            expect(aliasId(bound, 'alias.0.dev.empty')).to.deep.equal({
+                read: 'new.0.empty',
+                write: 'new.0.empty_set',
+            });
+            // the write ID is no history source
+            expect(sourcesOf(s, 'alias.0.dev.temp')).to.deep.equal(['old.0.t']);
+            // another source becomes live: the write ID belonged to the old one
+            const moved = linkAs(s, [{ sourceId: 'new.0.t', targetId: 'alias.0.dev.temp' }], 'read').state;
+            expect(sourcesOf(moved, 'alias.0.dev.temp')).to.deep.equal(['old.0.t', 'new.0.t']);
+            expect(writeIdOf(moved, 'alias.0.dev.temp')).to.equal(undefined);
+            // the read source itself is no write ID
+            expect(linkAs(s, [{ sourceId: 'old.0.t', targetId: 'alias.0.dev.temp' }], 'write').skipped).to.deep.equal([
+                'alias.0.dev.temp',
+            ]);
+        });
+
+        it('a selected write line removes the write ID, a read line the link (ME-14)', () => {
+            let s = importAliases(emptyState(), objects, 'alias.0.dev').state;
+            s = removeLine(s, { sourceId: 'old.0.set_target', targetId: 'alias.0.dev.set', write: true });
+            expect(writeIdOf(s, 'alias.0.dev.set')).to.equal(undefined);
+            expect(sourcesOf(s, 'alias.0.dev.set')).to.deep.equal(['old.0.set_actual']);
+            s = removeLine(s, { sourceId: 'old.0.set_actual', targetId: 'alias.0.dev.set' });
+            expect(sourcesOf(s, 'alias.0.dev.set')).to.deep.equal([]);
+            // a write ID that waits for its read source
+            let p = linkAs(
+                emptyState(),
+                [{ sourceId: 'new.0.w', targetId: 'alias.0.dev.empty' }],
+                'write',
+                objects,
+            ).state;
+            expect(writeIdOf(p, 'alias.0.dev.empty')).to.equal('new.0.w');
+            p = removeLine(p, { sourceId: 'new.0.w', targetId: 'alias.0.dev.empty', write: true });
+            expect(writeLinks(p)).to.deep.equal([]);
+        });
+
+        it('the write ID can be removed in the editor - also a read-in one', () => {
+            let s = importAliases(emptyState(), objects, 'alias.0.dev').state;
+            s = setOptions(s, 'alias.0.dev.set', { writeId: { read: 'old.0.set_actual', id: null } });
+            expect(writeIdOf(s, 'alias.0.dev.set')).to.equal(undefined);
+            expect(isUnchangedImport(s, 'alias.0.dev.set', objects['alias.0.dev.set'])).to.equal(false);
+            expect(buildPlan(s, objects).aliases).to.deep.equal([
+                { targetId: 'alias.0.dev.set', alias: { id: 'old.0.set_actual' } },
+            ]);
         });
 
         it('a source that is linked to another target already is reported, not linked twice (AM-13)', () => {

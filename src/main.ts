@@ -5,7 +5,7 @@
  */
 
 import * as utils from '@iobroker/adapter-core';
-import { mirrorStructure, validateBasePath } from './lib/alias/createMode';
+import { mirrorStructure, sourcesWithSettings, validateBasePath } from './lib/alias/createMode';
 import { HistoryAdapterBackend, MAX_RAW_PAGE, type HistoryBackend } from './lib/history/HistoryBackend';
 import { isAllowedSender } from './lib/access';
 import { isRunId, isValidId, MigrationRunner } from './lib/migration/MigrationRunner';
@@ -142,7 +142,8 @@ class Objectmigrator extends utils.Adapter {
         // ---- create mode
         'mirror.preview': async (msg: { sourceRoot: string; basePath: string; onlySourceIds?: string[] }) => {
             const errors = validateBasePath(String(msg?.basePath ?? ''));
-            if (!isValidId(msg?.sourceRoot)) {
+            // the source root may be a top level like "hm-rpc" (all instances) - only read
+            if (!isValidId(msg?.sourceRoot) && !isValidId(`${String(msg?.sourceRoot)}.x`)) {
                 errors.push({ code: 'invalidId', args: { value: String(msg?.sourceRoot) } });
             }
             if (errors.length) {
@@ -160,13 +161,12 @@ class Objectmigrator extends utils.Adapter {
                     existingIds.add(parts.join('.'));
                 }
             }
-            return {
-                errors: [],
-                drafts: mirrorStructure(msg.sourceRoot, objects, msg.basePath, {
-                    existingIds,
-                    onlySourceIds: msg.onlySourceIds ? new Set(idList(msg.onlySourceIds)) : undefined,
-                }),
-            };
+            const drafts = mirrorStructure(msg.sourceRoot, objects, msg.basePath, {
+                existingIds,
+                onlySourceIds: msg.onlySourceIds ? new Set(idList(msg.onlySourceIds)) : undefined,
+            });
+            // the tab links on request only the values with adapter settings (EM-14)
+            return { errors: [], drafts, withSettings: sourcesWithSettings(drafts, objects) };
         },
 
         // ---- "Prüfen" / "Schreiben" (06 §5)

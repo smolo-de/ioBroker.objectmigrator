@@ -104,7 +104,8 @@ body,
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 0 4px;
+    /* room between the value and the scroll bar */
+    padding: 0 14px 0 4px;
     white-space: nowrap;
     cursor: default;
     font-size: 13px;
@@ -404,6 +405,22 @@ body,
     color: #3399cc;
     cursor: pointer;
 }
+/* read in / take back per row (FR-56) */
+.om-row-icon {
+    flex: none;
+    width: 20px;
+    font-size: 16px;
+    line-height: 20px;
+    font-weight: bold;
+    text-align: center;
+    border-radius: 4px;
+    color: #3399cc;
+    cursor: pointer;
+}
+.om-row-icon:hover {
+    background: #3399cc;
+    color: #fff;
+}
 .om-row:hover .om-root-btn {
     display: inline;
 }
@@ -426,6 +443,15 @@ body,
     border-left: 3px solid var(--om-border);
     padding-left: 8px;
     margin: 6px 0;
+}
+/* separate write ID below the live source (AM-12) */
+.om-source-write {
+    margin-top: 2px;
+    padding-left: 2px;
+}
+.om-source-write .om-muted {
+    flex: none;
+    white-space: nowrap;
 }
 .om-source-block .om-section {
     border-top: none;
@@ -711,9 +737,26 @@ body,
 /* "? Linien": legend of the lines and marks */
 .om-gutter-head {
     display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding-bottom: 8px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    padding-bottom: 4px;
+}
+/* "only the related lines" and "dragging links as …" - in the middle above the lines */
+.om-gutter-switch {
+    margin: 0 !important;
+}
+.om-gutter-switch .MuiFormControlLabel-label {
+    font-size: 12px;
+    white-space: nowrap;
+}
+/* the link-as question: its answers stay on one line */
+.om-ask-actions .MuiButton-root {
+    white-space: nowrap;
+}
+.om-gutter-select {
+    font-size: 12px !important;
 }
 .om-legend {
     padding: 4px 16px 12px;
@@ -769,4 +812,22 @@ body,
 }
 .om-no-source {
     margin-top: 4px;
+}
+
+/* original adapter settings of the admin in an overlay */
+.om-customs-paper {
+    height: 90vh;
+}
+.om-customs-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.om-customs-frame {
+    flex: 1;
+    width: 100%;
+    border: 0;
+}
+.om-customs-hint {
+    padding: 4px 16px 8px;
 }

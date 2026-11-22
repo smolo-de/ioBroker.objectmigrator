@@ -199,7 +199,12 @@ export function planSettings(
         } else if (settings.enabled !== false && value.enabled !== false) {
             if (HISTORY_ADAPTERS.includes(adapter)) {
                 plan.warnings.push({ code: 'doubleLogging', args: { key } });
-            } else if (adapter === 'lovelace') {
+            } else if (
+                adapter === 'lovelace' &&
+                // the entity ID is "<entity>.<name>" - another name at the target is no duplicate
+                (value.entity ?? '') === (settings.entity ?? '') &&
+                (value.name ?? '') === (settings.name ?? '')
+            ) {
                 plan.warnings.push({ code: 'lovelaceDuplicate', args: { key } });
             }
         }

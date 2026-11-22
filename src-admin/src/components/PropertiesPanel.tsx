@@ -1,4 +1,5 @@
 import { Button, Checkbox, FormControlLabel, IconButton, MenuItem, TextField, Tooltip } from '@mui/material';
+import { openCustomSettings } from '../adminLink';
 import React from 'react';
 import { isConverting } from '../../../src/lib/alias/converter';
 import { normalizeIdPart } from '../../../src/lib/alias/createMode';
@@ -8,9 +9,12 @@ import {
     aliasReadId,
     compat,
     converterOf,
+    liveSourceOf,
     nodeName,
     overlapOf,
     sourcesOf,
+    writeIdOf,
+    writeLinks,
     type EditorState,
     type ObjInfo,
     type OverlapRule,
@@ -47,6 +51,8 @@ export interface PropertiesPanelProps {
     onShowHistory: (id: string) => void;
     /** read the existing alias mappings of a node in (FR-56) */
     onImport?: (id: string) => void;
+    /** take the read-in mappings at or below a node back (FR-56) */
+    onUnimport?: (id: string) => void;
     /** change the DB name (aliasId) of the object at a logging instance (FR-57) */
     onDbName?: (id: string, instance: string, current: string) => void;
     /** Names of the rooms/functions an object is member of */
@@ -209,12 +215,14 @@ function SourceCustom(props: {
  * @param props.imported - the mapping is read into the plan
  * @param props.onSelect - show a source in the left tree
  * @param props.onImport - read this mapping in (only without links)
+ * @param props.onUnimport - take the read-in mapping back
  */
 function AliasNow(props: {
     alias: unknown;
     imported: boolean;
     onSelect: (id: string) => void;
     onImport?: () => void;
+    onUnimport?: () => void;
 }): React.JSX.Element | null {
     const alias = props.alias as { id?: unknown; read?: unknown; write?: unknown } | undefined;
     const read = aliasReadId(alias?.id);
@@ -255,6 +263,15 @@ function AliasNow(props: {
                     title={t('importAliasesHelp')}
                 >
                     ⇠ {t('importAliases')}
+                </Button>
+            )}
+            {props.onUnimport && (
+                <Button
+                    size="small"
+                    onClick={props.onUnimport}
+                    title={t('unimportHelp')}
+                >
+                    ↶ {t('unimport')}
                 </Button>
             )}
         </div>
@@ -318,10 +335,21 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
     // ---- source row
     if (props.side === 'source') {
         const link = state.links.find(l => l.sourceId === node.id);
+        /** aliases that write to this object (separate write ID, AM-12) */
+        const writers = writeLinks(state).filter(l => l.sourceId === node.id);
         return (
             <div className="om-panel">
                 <h3>{nodeName(node, lang)}</h3>
                 <div className="om-id">{node.id}</div>
+                {node.type === 'state' && (
+                    <Button
+                        size="small"
+                        title={t('openCustomsHelp')}
+                        onClick={e => openCustomSettings(node.id, e.ctrlKey || e.metaKey)}
+                    >
+                        ⚙ {t('openCustoms')}
+                    </Button>
+                )}
                 <div className="om-muted">
                     {node.type} {common.role ? `· ${common.role}` : ''} {common.type ? `· ${common.type}` : ''}{' '}
                     {common.unit ? `· ${common.unit}` : ''}
@@ -360,6 +388,24 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
                         </a>
                     </p>
                 )}
+                {writers.map(w => (
+                    <p
+                        key={w.targetId}
+                        title={t('writeIdHelp')}
+                    >
+                        ✎{' '}
+                        <a
+                            href="#"
+                            onClick={e => {
+                                e.preventDefault();
+                                props.onSelect('target', w.targetId);
+                            }}
+                        >
+                            {w.targetId}
+                        </a>{' '}
+                        <span className="om-muted">{t('writesHere')}</span>
+                    </p>
+                ))}
                 {isState && <Button onClick={() => props.onShowHistory(node.id)}>📈 {t('showHistory')}</Button>}
             </div>
         );
@@ -375,7 +421,13 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
     const setOverlap = (rule: OverlapRule): void => props.onOptions(node.id, { overlap: rule });
     const overlapValue =
         overlap.type === 'prefer' ? `prefer:${overlap.sourceId}` : overlap.type === 'cut' ? 'cut' : overlap.type;
-    const live = opts.liveSource && sources.includes(opts.liveSource) ? opts.liveSource : sources.at(-1);
+    const live = liveSourceOf(state, node.id);
+    /** separate write ID of the live source (AM-12) */
+    const writeId = writeIdOf(state, node.id);
+    /** read-in mappings at or below this node - "Einlesen zurücknehmen" (FR-56) */
+    const importedBelow = Object.entries(state.options).some(
+        ([id, o]) => o.imported && (id === node.id || id.startsWith(`${node.id}.`)),
+    );
     const setConverter = (sourceId: string, c: ValueConverter | undefined): void => {
         const converters = { ...opts.converters };
         if (c) {
@@ -406,6 +458,16 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
                         </Button>
                     </Tooltip>
                 )}
+                {!isState && importedBelow && props.onUnimport && (
+                    <Tooltip title={t('unimportHelp')}>
+                        <Button
+                            size="small"
+                            onClick={() => props.onUnimport!(node.id)}
+                        >
+                            ↶ {t('unimport')}
+                        </Button>
+                    </Tooltip>
+                )}
                 {!isState && (
                     <Tooltip title={t('saveTemplate')}>
                         <IconButton
@@ -429,6 +491,15 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
                 )}
             </div>
             <div className="om-id">{node.id}</div>
+            {!node.draft && node.type === 'state' && (
+                <Button
+                    size="small"
+                    title={t('openCustomsHelp')}
+                    onClick={e => openCustomSettings(node.id, e.ctrlKey || e.metaKey)}
+                >
+                    ⚙ {t('openCustoms')}
+                </Button>
+            )}
             {isState && !node.draft && (
                 <DbNamesOf
                     custom={common.custom as Record<string, unknown> | undefined}
@@ -580,12 +651,46 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
                             imported={!!opts.imported}
                             onSelect={id => props.onSelect('source', id)}
                             onImport={props.onImport && !sources.length ? () => props.onImport!(node.id) : undefined}
+                            onUnimport={
+                                props.onUnimport && opts.imported ? () => props.onUnimport!(node.id) : undefined
+                            }
                         />
                     )}
                     {!sources.length && <div className="om-muted">{t('noSourceYet')}</div>}
                     {!sources.length && node.draft && isAlias && (
                         <div className="om-muted om-no-source">
                             {t('noSourceDraft')} <NewObjectsHelp />
+                        </div>
+                    )}
+                    {!live && writeId && (
+                        // set before the read source (ME-21)
+                        <div className="om-source-block">
+                            <div
+                                className="om-source om-source-write"
+                                title={t('writeIdPending')}
+                            >
+                                <span
+                                    className={`om-dot om-compat-${compat(props.objects[writeId], node.obj).level}`}
+                                />
+                                <span className="om-muted">✎ {t('aliasWriteTo')}</span>
+                                <a
+                                    href="#"
+                                    onClick={e => {
+                                        e.preventDefault();
+                                        props.onSelect('source', writeId);
+                                    }}
+                                >
+                                    {writeId}
+                                </a>
+                                <span
+                                    className="om-x"
+                                    title={t('writeIdRemove')}
+                                    onClick={() => props.onOptions(node.id, { writeId: { read: '', id: null } })}
+                                >
+                                    ✕
+                                </span>
+                            </div>
+                            <div className="om-muted">{t('writeIdPending')}</div>
                         </div>
                     )}
                     {sources.map(id => {
@@ -617,6 +722,61 @@ export function PropertiesPanel(props: PropertiesPanelProps): React.JSX.Element 
                                     </span>
                                 </div>
                                 {c.reason && <div className="om-muted">{c.reason}</div>}
+                                {id === live && writeId && (
+                                    <div
+                                        className="om-source om-source-write"
+                                        title={t('writeIdHelp')}
+                                    >
+                                        <span
+                                            className={`om-dot om-compat-${compat(props.objects[writeId], node.obj).level}`}
+                                        />
+                                        <span className="om-muted">✎ {t('aliasWriteTo')}</span>
+                                        <a
+                                            href="#"
+                                            onClick={e => {
+                                                e.preventDefault();
+                                                props.onSelect('source', writeId);
+                                            }}
+                                        >
+                                            {writeId}
+                                        </a>
+                                        <span
+                                            className="om-x"
+                                            title={t('writeIdSet')}
+                                            onClick={() =>
+                                                props.onPickObject(props.pickStart, w =>
+                                                    props.onOptions(node.id, { writeId: { read: id, id: w } }),
+                                                )
+                                            }
+                                        >
+                                            🔍
+                                        </span>
+                                        <span
+                                            className="om-x"
+                                            title={t('writeIdRemove')}
+                                            onClick={() =>
+                                                props.onOptions(node.id, { writeId: { read: id, id: null } })
+                                            }
+                                        >
+                                            ✕
+                                        </span>
+                                    </div>
+                                )}
+                                {id === live && !writeId && isAlias && (
+                                    <div className="om-source om-source-write">
+                                        <Button
+                                            size="small"
+                                            title={t('writeIdHelp')}
+                                            onClick={() =>
+                                                props.onPickObject(props.pickStart, w =>
+                                                    props.onOptions(node.id, { writeId: { read: id, id: w } }),
+                                                )
+                                            }
+                                        >
+                                            ✎ {t('writeIdSet')}
+                                        </Button>
+                                    </div>
+                                )}
                                 <Section
                                     title={t('conversion')}
                                     open={isConverting(conv)}
