@@ -18,8 +18,10 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var createMode_exports = {};
 __export(createMode_exports, {
+  hasAdapterSettings: () => hasAdapterSettings,
   mirrorStructure: () => mirrorStructure,
   normalizeIdPart: () => normalizeIdPart,
+  sourcesWithSettings: () => sourcesWithSettings,
   validateBasePath: () => validateBasePath
 });
 module.exports = __toCommonJS(createMode_exports);
@@ -41,6 +43,14 @@ function validateBasePath(basePath) {
     }
   });
   return errors;
+}
+function hasAdapterSettings(obj) {
+  var _a;
+  const custom = (_a = obj == null ? void 0 : obj.common) == null ? void 0 : _a.custom;
+  return !!custom && typeof custom === "object" && Object.values(custom).some((v) => !!v && typeof v === "object");
+}
+function sourcesWithSettings(drafts, objects) {
+  return drafts.filter((d) => d.type === "state" && d.sourceId && hasAdapterSettings(objects[d.sourceId])).map((d) => d.sourceId);
 }
 const MIRRORED_STATE_COMMON = [
   "name",
@@ -131,8 +141,10 @@ function mirrorStructure(sourceRoot, objects, basePath, options = {}) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  hasAdapterSettings,
   mirrorStructure,
   normalizeIdPart,
+  sourcesWithSettings,
   validateBasePath
 });
 //# sourceMappingURL=createMode.js.map

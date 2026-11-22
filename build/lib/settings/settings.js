@@ -63,7 +63,7 @@ function deepMerge(a, b) {
   return result;
 }
 function planSettings(source, target, instances, options = {}) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w;
   const plan = { targetCustom: {}, sourceCustom: {}, targetCommon: {}, status: {}, warnings: [] };
   const sourceMode = (_a = options.sourceMode) != null ? _a : "keep";
   const copyUninstalled = (_b = options.copyUninstalled) != null ? _b : true;
@@ -120,29 +120,30 @@ function planSettings(source, target, instances, options = {}) {
     } else if (settings.enabled !== false && value.enabled !== false) {
       if (HISTORY_ADAPTERS.includes(adapter)) {
         plan.warnings.push({ code: "doubleLogging", args: { key } });
-      } else if (adapter === "lovelace") {
+      } else if (adapter === "lovelace" && // the entity ID is "<entity>.<name>" - another name at the target is no duplicate
+      ((_l = value.entity) != null ? _l : "") === ((_m = settings.entity) != null ? _m : "") && ((_n = value.name) != null ? _n : "") === ((_o = settings.name) != null ? _o : "")) {
         plan.warnings.push({ code: "lovelaceDuplicate", args: { key } });
       }
     }
   }
-  for (const [key, override] of Object.entries((_l = options.overrides) != null ? _l : {})) {
-    if (key in plan.targetCustom || ((_m = options.exclude) == null ? void 0 : _m.includes(key)) || !override) {
+  for (const [key, override] of Object.entries((_p = options.overrides) != null ? _p : {})) {
+    if (key in plan.targetCustom || ((_q = options.exclude) == null ? void 0 : _q.includes(key)) || !override) {
       continue;
     }
-    plan.targetCustom[key] = deepMerge((_n = targetCustom[key]) != null ? _n : {}, override);
-    plan.status[key] = (_o = instances[key]) != null ? _o : "missing";
+    plan.targetCustom[key] = deepMerge((_r = targetCustom[key]) != null ? _r : {}, override);
+    plan.status[key] = (_s = instances[key]) != null ? _s : "missing";
   }
   const sourceCommon = source.common;
-  const targetCommon = (_p = target == null ? void 0 : target.common) != null ? _p : {};
-  if (((_q = options.copySmartName) != null ? _q : true) && !isEmpty(sourceCommon.smartName)) {
+  const targetCommon = (_t = target == null ? void 0 : target.common) != null ? _t : {};
+  if (((_u = options.copySmartName) != null ? _u : true) && !isEmpty(sourceCommon.smartName)) {
     plan.targetCommon.smartName = structuredClone(sourceCommon.smartName);
   }
-  for (const attr of (_r = options.copyCommon) != null ? _r : []) {
+  for (const attr of (_v = options.copyCommon) != null ? _v : []) {
     if (!isEmpty(sourceCommon[attr]) && isEmpty(targetCommon[attr])) {
       plan.targetCommon[attr] = structuredClone(sourceCommon[attr]);
     }
   }
-  for (const [attr, value] of Object.entries((_s = options.commonOverrides) != null ? _s : {})) {
+  for (const [attr, value] of Object.entries((_w = options.commonOverrides) != null ? _w : {})) {
     plan.targetCommon[attr] = value;
   }
   return plan;

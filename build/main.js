@@ -139,7 +139,7 @@ class Objectmigrator extends utils.Adapter {
     "mirror.preview": async (msg) => {
       var _a;
       const errors = (0, import_createMode.validateBasePath)(String((_a = msg == null ? void 0 : msg.basePath) != null ? _a : ""));
-      if (!(0, import_MigrationRunner.isValidId)(msg == null ? void 0 : msg.sourceRoot)) {
+      if (!(0, import_MigrationRunner.isValidId)(msg == null ? void 0 : msg.sourceRoot) && !(0, import_MigrationRunner.isValidId)(`${String(msg == null ? void 0 : msg.sourceRoot)}.x`)) {
         errors.push({ code: "invalidId", args: { value: String(msg == null ? void 0 : msg.sourceRoot) } });
       }
       if (errors.length) {
@@ -157,13 +157,11 @@ class Objectmigrator extends utils.Adapter {
           existingIds.add(parts.join("."));
         }
       }
-      return {
-        errors: [],
-        drafts: (0, import_createMode.mirrorStructure)(msg.sourceRoot, objects, msg.basePath, {
-          existingIds,
-          onlySourceIds: msg.onlySourceIds ? new Set(idList(msg.onlySourceIds)) : void 0
-        })
-      };
+      const drafts = (0, import_createMode.mirrorStructure)(msg.sourceRoot, objects, msg.basePath, {
+        existingIds,
+        onlySourceIds: msg.onlySourceIds ? new Set(idList(msg.onlySourceIds)) : void 0
+      });
+      return { errors: [], drafts, withSettings: (0, import_createMode.sourcesWithSettings)(drafts, objects) };
     },
     // ---- "Prüfen" / "Schreiben" (06 §5)
     "plan.check": (msg) => this.runner.check(msg),
