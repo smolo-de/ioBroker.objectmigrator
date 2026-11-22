@@ -10,7 +10,10 @@ import {
     DialogTitle,
     FormControlLabel,
     LinearProgress,
+    MenuItem,
+    Select,
     Snackbar,
+    Switch,
     TextField,
     Tooltip,
 } from '@mui/material';
@@ -33,12 +36,14 @@ import { converterToAlias } from '../../src/lib/alias/converter';
 import { formatMessage, type Message } from '../../src/lib/messages';
 import type { Connection } from './connection';
 import { language, setLanguage, t } from './i18n';
+import { customSettingsUrl, OPEN_CUSTOMS_EVENT } from './adminLink';
 import { readSession, writeSession, type TabSession, type TreeSession } from './session';
 import {
     ALL_OBJECTS,
     addLink,
     addNode,
     addState,
+    aliasReadId,
     applyTemplate,
     changedTargets,
     clearOptions,
@@ -48,11 +53,17 @@ import {
     autoLinks,
     buildPlan,
     buildTree,
+    canWrite,
+    linkAs,
+    plannedCustom,
+    liveSourceOf,
     compat,
     emptyState,
     expandToDepth,
     flatten,
     importAliases,
+    removeImports,
+    writeLinks,
     isUnchangedImport,
     hasSettings,
     moveDraft,
@@ -61,19 +72,23 @@ import {
     overlapOf,
     parentsOf,
     removeDraft,
+    removeLine,
     removeLink,
     setOptions,
     sourcesOf,
     updateDraft,
     type DraftObject,
     type EditorState,
+    type LineRef,
     type Link,
+    type LinkAs,
+    type MirrorLinks,
     type ObjInfo,
     type Row,
     type TreeNode,
 } from './model';
 
-const GUTTER = 110;
+const GUTTER = 150;
 /** smallest height of the log list in px */
 const LOG_MIN = 60;
 
@@ -510,6 +525,14 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     /** Multi selection in the source tree (Ctrl/Shift click) - mirrored in the create mode */
     const [sourceSelection, setSourceSelection] = React.useState<Set<string>>(() => new Set(session?.sourceSelection));
     const selectionAnchor = React.useRef<string>(undefined);
+    /** multi selection in the target tree (Strg/Shift-Klick) - remove and move several new objects */
+    const [targetSelection, setTargetSelection] = React.useState<Set<string>>(() => new Set());
+    const targetAnchor = React.useRef<string>(undefined);
+    /** the selected new objects, without those below another selected one (they go along) */
+    const selectedDrafts = (ids: Iterable<string>, isDraft: (id: string) => boolean): string[] => {
+        const list = [...ids].filter(isDraft);
+        return list.filter(id => !list.some(o => o !== id && id.startsWith(`${o}.`)));
+    };
     const [lang, setLang] = React.useState<'de' | 'en'>('de');
     const [widths, setWidths] = React.useState<{ left: number; panel: number }>(() => {
         try {
@@ -528,7 +551,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     const [saveTemplateFor, setSaveTemplateFor] = React.useState<string>();
     const [confirmClear, setConfirmClear] = React.useState(false);
     const [applyTemplateOpen, setApplyTemplateOpen] = React.useState(false);
-    const [selectedLink, setSelectedLink] = React.useState<Link | undefined>(session?.selectedLink);
+    const [selectedLink, setSelectedLink] = React.useState<LineRef | undefined>(session?.selectedLink);
     const [pickedSource, setPickedSource] = React.useState<string | undefined>(session?.pickedSource);
     /** Target of the history preview - the request is built from the current state (cut/exclusions) */
     const [historyFor, setHistoryFor] = React.useState<string | undefined>(session?.historyFor);
@@ -549,6 +572,32 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     conflictRef.current = !!conflict;
     const [checkState, setCheckState] = React.useState<{ loading: boolean; result?: CheckResult; error?: string }>();
     const [createMode, setCreateMode] = React.useState<{ error?: string }>();
+    /** dragging onto an alias links as read source, write ID, or asks (ME-21) - per browser, default read */
+    const [linkMode, setLinkMode] = React.useState<LinkAs>(() => {
+        try {
+            const stored = window.localStorage.getItem('objectmigrator.linkAs') as LinkAs;
+            return stored === 'write' || stored === 'ask' ? stored : 'read';
+        } catch {
+            return 'read';
+        }
+    });
+    const chooseLinkMode = (mode: LinkAs): void => {
+        setLinkMode(mode);
+        try {
+            window.localStorage.setItem('objectmigrator.linkAs', mode);
+        } catch {
+            // only not remembered
+        }
+    };
+    /** "ask": the links waiting for the answer */
+    const [askLink, setAskLink] = React.useState<{ links: Link[]; select?: string }>();
+    /** object whose original adapter settings are shown in the overlay (admin page in a frame) */
+    const [customsOf, setCustomsOf] = React.useState<string>();
+    React.useEffect(() => {
+        const open = (e: Event): void => setCustomsOf((e as CustomEvent<string>).detail);
+        window.addEventListener(OPEN_CUSTOMS_EVENT, open);
+        return () => window.removeEventListener(OPEN_CUSTOMS_EVENT, open);
+    }, []);
     const [run, setRun] = React.useState<RunInfo>({});
     /** Log of the current/last run - live from the state run.log */
     const [runLog, setRunLog] = React.useState<{ runId?: string; entries: RunLogEntry[] }>({ entries: [] });
@@ -566,7 +615,12 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         return 170;
     });
     const [confirmAbort, setConfirmAbort] = React.useState(false);
-    const [toast, setToast] = React.useState<{ text: string; severity: 'success' | 'error' | 'info' | 'warning' }>();
+    const [toast, setToast] = React.useState<{
+        text: string;
+        severity: 'success' | 'error' | 'info' | 'warning';
+        /** offers 'Rückgängig' in the message */
+        undo?: () => void;
+    }>();
     const [bodyHeight, setBodyHeight] = React.useState(400);
     const bodyRef = React.useRef<HTMLDivElement>(null);
     const mainRef = React.useRef<HTMLDivElement>(null);
@@ -582,7 +636,12 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
             ].sort(),
         [instances, ns],
     );
-    const linkedSources = React.useMemo(() => new Set(state.links.map(l => l.sourceId)), [state.links]);
+    /** separate write IDs (AM-12): the alias writes there - drawn as their own lines */
+    const writes = React.useMemo(() => writeLinks(state), [state]);
+    const linkedSources = React.useMemo(
+        () => new Set([...state.links, ...writes].map(l => l.sourceId)),
+        [state.links, writes],
+    );
     const wholeTree = React.useMemo(
         () => ({ namespaces: rootChoices, linked: [...linkedSources] }),
         [rootChoices, linkedSources],
@@ -920,7 +979,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     // ---- link display
     const drawLinks: DrawLink[] = React.useMemo(
         () =>
-            state.links.map(l => {
+            [...state.links, ...writes.map(l => ({ ...l, write: true }))].map(l => {
                 const c = compat(objectOf(l.sourceId), objectOf(l.targetId));
                 return {
                     ...l,
@@ -931,7 +990,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                 };
             }),
         // (dependencies on purpose incomplete)
-        [state.links, state.options, allObjects, right.nodes, left.nodes, run.status],
+        [state.links, state.options, writes, allObjects, right.nodes, left.nodes, run.status],
     );
     const countLinks = (ids: string[]): Map<string, number> => {
         const map = new Map<string, number>();
@@ -944,22 +1003,92 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         }
         return map;
     };
-    const leftCounts = React.useMemo(() => countLinks(state.links.map(l => l.sourceId)), [state.links]);
+    const leftCounts = React.useMemo(
+        () => countLinks([...state.links, ...writes].map(l => l.sourceId)),
+        [state.links, writes],
+    );
     const rightCounts = React.useMemo(() => countLinks(state.links.map(l => l.targetId)), [state.links]);
 
     const highlight = React.useMemo(() => {
         const set = new Set<string>();
         if (selected?.side === 'target') {
             sourcesOf(state, selected.id).forEach(id => set.add(id));
+            writes.filter(l => l.targetId === selected.id).forEach(l => set.add(l.sourceId));
         } else if (selected?.side === 'source') {
-            state.links.filter(l => l.sourceId === selected.id).forEach(l => set.add(l.targetId));
+            [...state.links, ...writes].filter(l => l.sourceId === selected.id).forEach(l => set.add(l.targetId));
         }
         return set;
-    }, [selected, state]);
+    }, [selected, state, writes]);
     const focusIds = React.useMemo(
         () => (selected ? new Set([selected.id, ...highlight]) : new Set<string>()),
         [selected, highlight],
     );
+    /** a selected node (no value): the lines of the values below it belong to it (ME-14) */
+    const focusNode =
+        selected && (selected.side === 'source' ? left : right).nodes.get(selected.id)?.type !== 'state'
+            ? selected.id
+            : undefined;
+    /**
+     * "Alle Verbindungen" (ME-14): while a row is selected all lines stay visible, the others faded;
+     * off: only the lines of the selection - remembered per browser, default on
+     */
+    const [allLinks, setAllLinks] = React.useState<boolean>(() => {
+        try {
+            return window.localStorage.getItem('objectmigrator.allLinks') !== '0';
+        } catch {
+            return true;
+        }
+    });
+    const switchAllLinks = (on: boolean): void => {
+        setAllLinks(on);
+        try {
+            window.localStorage.setItem('objectmigrator.allLinks', on ? '1' : '0');
+        } catch {
+            // only not remembered
+        }
+    };
+    /**
+     * The menu of the link mode is open: its tooltip would cover the menu. Right after choosing, the
+     * tooltip does not come back either (the closing menu hands the mouse back to the select).
+     */
+    const [linkModeMenu, setLinkModeMenu] = React.useState(false);
+    const [linkModeTip, setLinkModeTip] = React.useState(false);
+    const linkModeMenuClosed = React.useRef(0);
+
+    /**
+     * Symbols per row of the right tree (FR-56): something to read in (an alias.id that is no link yet),
+     * read-in mappings to take back - marked at the row and at all its parents
+     */
+    const importMarks = React.useMemo(() => {
+        const importable = new Set<string>();
+        const imported = new Set<string>();
+        const mark = (id: string, set: Set<string>): void => {
+            const parts = id.split('.');
+            for (let i = parts.length; i >= 2; i--) {
+                const p = parts.slice(0, i).join('.');
+                if (set.has(p)) {
+                    return;
+                }
+                set.add(p);
+            }
+        };
+        const linked = new Set(state.links.map(l => `${l.sourceId}|${l.targetId}`));
+        for (const [id, obj] of Object.entries(right.objects)) {
+            if (!id.startsWith('alias.') || obj?.type !== 'state') {
+                continue;
+            }
+            const read = aliasReadId((obj.common?.alias as { id?: unknown } | undefined)?.id);
+            if (read && !linked.has(`${read}|${id}`)) {
+                mark(id, importable);
+            }
+        }
+        for (const [id, o] of Object.entries(state.options)) {
+            if (o.imported && id.startsWith('alias.')) {
+                mark(id, imported);
+            }
+        }
+        return { importable, imported };
+    }, [right.objects, state.links, state.options]);
 
     // a read-in mapping (FR-56) is not "changed" while it is as it was
     const changed = React.useMemo(
@@ -976,25 +1105,80 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     }, [state.options]);
 
     // ---- actions
+    /**
+     * Mirrors a source structure as drafts (EM-02) and links the mirrored values - all, only the ones
+     * with adapter settings or none (EM-14)
+     *
+     * @returns an error text, or how many values were mirrored and linked
+     */
     const mirror = async (
         sourceRoot: string,
         basePath: string,
         keepBelow?: string,
         onlySourceIds?: string[],
-    ): Promise<string | undefined> => {
-        const res = await socket.send<{ errors: Message[]; drafts: DraftObject[] }>('mirror.preview', {
-            sourceRoot,
-            basePath,
-            onlySourceIds,
-        });
+        links: MirrorLinks = 'all',
+    ): Promise<{ error?: string; values: number; linked: number }> => {
+        const res = await socket.send<{ errors: Message[]; drafts: DraftObject[]; withSettings?: string[] }>(
+            'mirror.preview',
+            { sourceRoot, basePath, onlySourceIds },
+        );
         if (res.errors.length) {
-            return res.errors.map(e => formatMessage(e, language())).join(', ');
+            return { error: res.errors.map(e => formatMessage(e, language())).join(', '), values: 0, linked: 0 };
         }
         // dropped into an existing node: its own draft and its parents stay as they are
         const drafts = keepBelow ? res.drafts.filter(d => d.id.startsWith(`${keepBelow}.`)) : res.drafts;
-        editor.update(s => applyMirror(s, drafts));
+        const only = links === 'all' ? undefined : new Set(links === 'settings' ? (res.withSettings ?? []) : []);
+        editor.update(s => applyMirror(s, drafts, only));
         right.setExpanded(prev => new Set([...prev, ...drafts.filter(d => d.type !== 'state').map(d => d.id)]));
-        return undefined;
+        const values = drafts.filter(d => d.type === 'state' && d.sourceId);
+        return {
+            values: values.length,
+            linked: only ? values.filter(d => only.has(d.sourceId!)).length : values.length,
+        };
+    };
+
+    /**
+     * Links as read source or write ID - as set in the middle, or asked (ME-21)
+     *
+     * @param links - source → target
+     * @param as - read source or write ID
+     * @param select - target to select afterwards
+     */
+    const doLink = (links: Link[], as: 'read' | 'write', select?: string): void => {
+        const known = { ...allObjects, ...right.objects };
+        const res = linkAs(state, links, as, known);
+        editor.update(s => linkAs(s, links, as, known).state);
+        if (res.state.sourceRoot !== state.sourceRoot) {
+            // an alias that was not read in keeps its read source - it must be visible on the left
+            left.reveal(
+                links.map(l => liveSourceOf(res.state, l.targetId)).filter((id): id is string => !!id),
+                res.state.sourceRoot,
+            );
+        }
+        if (select) {
+            setSelected({ side: 'target', id: select });
+            setSelectedLink(undefined);
+        }
+        if (links.length > 1 || res.write || res.pending || res.skipped.length) {
+            setToast({
+                text: [
+                    res.read ? t('linkedRead', { n: res.read }) : '',
+                    res.write ? t('linkedWrite', { n: res.write }) : '',
+                    res.pending ? t('linkedWritePending', { n: res.pending }) : '',
+                    res.skipped.length ? t('linkSkipped', { n: res.skipped.length }) : '',
+                ]
+                    .filter(Boolean)
+                    .join(' · '),
+                severity: res.skipped.length ? 'warning' : 'success',
+            });
+        }
+    };
+    const linkSources = (links: Link[], select?: string): void => {
+        if (linkMode === 'ask' && canWrite(state, links, { ...allObjects, ...right.objects })) {
+            setAskLink({ links, select });
+        } else {
+            doLink(links, linkMode === 'write' ? 'write' : 'read', select);
+        }
     };
 
     const onDrop = (payload: DragPayload, row: Row): void => {
@@ -1013,7 +1197,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
             }
             if (target.id.startsWith('alias.') && common.length >= 2) {
                 void mirror(common.join('.'), target.id, target.id, ids)
-                    .then(error => error && fail(new Error(error)))
+                    .then(res => res.error && fail(new Error(res.error)))
                     .catch(fail);
                 right.setExpanded(prev => new Set([...prev, target.id]));
             }
@@ -1025,13 +1209,11 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                 return;
             }
             if (source.type === 'state' && target.type === 'state') {
-                editor.update(s => addLink(s, source.id, target.id));
-                setSelected({ side: 'target', id: target.id });
+                linkSources([{ sourceId: source.id, targetId: target.id }], target.id);
             } else if (target.type !== 'state') {
                 const links = source.type === 'state' ? [] : autoLinks(source, target, language());
                 if (links.length) {
-                    editor.update(s => links.reduce((acc, l) => addLink(acc, l.sourceId, l.targetId), s));
-                    setToast({ text: `${links.length} × ${t('link')}`, severity: 'success' });
+                    linkSources(links);
                 } else if (target.id.startsWith('alias.')) {
                     // nothing matches: mirror the dragged node/state below the target node (EM-07)
                     const isState = source.type === 'state';
@@ -1059,8 +1241,28 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                 }
             }
         } else if (payload.side === 'target' && target.type !== 'state' && payload.id !== target.id) {
-            const part = payload.id.split('.').pop()!;
-            editor.update(s => moveDraft(s, payload.id, `${target.id}.${part}`));
+            // several selected new objects move together
+            const ids = payload.ids?.length
+                ? selectedDrafts(payload.ids, id => !!right.nodes.get(id)?.draft)
+                : [payload.id];
+            // a name that exists at the target already (or twice in the selection) stays where it is
+            let skipped = 0;
+            const next = ids
+                .filter(id => id !== target.id && !target.id.startsWith(`${id}.`))
+                .reduce((acc, id) => {
+                    const to = `${target.id}.${id.split('.').pop()!}`;
+                    const taken = to !== id && (right.nodes.has(to) || acc.drafts.some(d => d.id === to));
+                    if (taken) {
+                        skipped++;
+                        return acc;
+                    }
+                    return moveDraft(acc, id, to);
+                }, state);
+            editor.update(() => next);
+            if (skipped) {
+                setToast({ text: t('moveSkipped', { n: skipped }), severity: 'warning' });
+            }
+            setTargetSelection(new Set());
             right.setExpanded(prev => new Set([...prev, target.id]));
         }
     };
@@ -1072,6 +1274,40 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         setToast({ text: `${t('write')}: ${runId}`, severity: 'info' });
     };
 
+    /**
+     * Takes the read-in mappings below a node back (FR-56); right after "einlesen" also the widened root
+     * of the left tree
+     *
+     * @param nodeId - alias node or state
+     * @param rootBefore - root of the left tree around "einlesen" - restored while it is still the widened one
+     * @param rootBefore.before - root before "einlesen"
+     * @param rootBefore.after - root widened by "einlesen"
+     */
+    const unimportFrom = (nodeId: string, rootBefore?: { before: string; after: string }): void => {
+        const res = removeImports(state, { ...allObjects, ...right.objects }, nodeId);
+        if (res.state !== state || (rootBefore && state.sourceRoot === rootBefore.after)) {
+            editor.update(() =>
+                rootBefore && res.state.sourceRoot === rootBefore.after
+                    ? { ...res.state, sourceRoot: rootBefore.before }
+                    : res.state,
+            );
+        }
+        setSelectedLink(undefined);
+        setToast({
+            text: [
+                t('unimported', { n: res.removed.length }),
+                res.kept.length ? t('unimportKept', { n: res.kept.length }) : '',
+            ]
+                .filter(Boolean)
+                .join(' · '),
+            severity: res.kept.length ? 'warning' : 'success',
+        });
+    };
+
+    /** the toast calls it later - with the state of then */
+    const unimportFromRef = React.useRef(unimportFrom);
+    unimportFromRef.current = unimportFrom;
+
     /** existing alias mappings below a node of the target tree become links (FR-56) */
     const importFrom = (nodeId: string): void => {
         const res = importAliases(state, { ...allObjects, ...right.objects }, nodeId);
@@ -1081,6 +1317,10 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                 prev => new Set([...prev, nodeId, ...res.imported.map(id => id.slice(0, id.lastIndexOf('.')))]),
             );
         }
+        const root =
+            res.state.sourceRoot !== state.sourceRoot
+                ? { before: state.sourceRoot, after: res.state.sourceRoot }
+                : undefined;
         // the sources in the left tree: parents expanded, scrolled to the first one
         left.reveal(res.sources, res.state.sourceRoot);
         const text = [
@@ -1098,6 +1338,8 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         setToast({
             text,
             severity: res.conflicts.length ? 'warning' : res.imported.length ? 'success' : 'info',
+            // take it back right away (FR-56) - later: "Einlesen zurücknehmen" in the panel
+            undo: res.imported.length ? () => unimportFromRef.current(nodeId, root) : undefined,
         });
     };
 
@@ -1158,10 +1400,21 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
             } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
                 e.preventDefault();
                 editor.redo();
+            } else if (e.key === 'Escape') {
+                // nothing selected: all lines are shown again (ME-14)
+                setSelected(undefined);
+                setSelectedLink(undefined);
+                setPickedSource(undefined);
+                setTargetSelection(new Set());
             } else if (e.key === 'Delete') {
                 if (selectedLink) {
-                    editor.update(s => removeLink(s, selectedLink));
+                    editor.update(s => removeLine(s, selectedLink));
                     setSelectedLink(undefined);
+                } else if (targetSelection.size > 1) {
+                    const ids = selectedDrafts(targetSelection, id => !!right.nodes.get(id)?.draft);
+                    editor.update(s => ids.reduce((acc, id) => removeDraft(acc, id), s));
+                    setTargetSelection(new Set());
+                    setSelected(undefined);
                 } else if (selected?.side === 'target' && right.nodes.get(selected.id)?.draft) {
                     editor.update(s => removeDraft(s, selected.id));
                     setSelected(undefined);
@@ -1170,7 +1423,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [editor, selected, selectedLink, right.nodes]);
+    }, [editor, selected, selectedLink, right.nodes, targetSelection]);
 
     const startResize = (e: React.MouseEvent, which: 'left' | 'panel'): void => {
         e.preventDefault();
@@ -1253,6 +1506,14 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                     <span className="om-spacer" />
                     {side === 'source' && sourceSelection.size > 1 && (
                         <span className="om-chip">{t('selected', { n: sourceSelection.size })}</span>
+                    )}
+                    {side === 'target' && targetSelection.size > 1 && (
+                        <span
+                            className="om-chip"
+                            title={t('targetSelectionHelp')}
+                        >
+                            {t('selected', { n: targetSelection.size })}
+                        </span>
                     )}
                     {side === 'target' && (
                         <>
@@ -1443,7 +1704,59 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                             className="om-gutter-head"
                             style={{ gridColumn: 3, gridRow: 1 }}
                         >
-                            <LinkLegend dark={props.dark} />
+                            <Tooltip
+                                title={t('lgAllLinks')}
+                                placement="top"
+                            >
+                                <FormControlLabel
+                                    className="om-gutter-switch"
+                                    control={
+                                        <Switch
+                                            size="small"
+                                            checked={allLinks}
+                                            onChange={e => switchAllLinks(e.target.checked)}
+                                        />
+                                    }
+                                    label={t('allLinksShort')}
+                                />
+                            </Tooltip>
+                            <Tooltip
+                                title={t('linkModeHelp')}
+                                placement="top"
+                                disableFocusListener
+                                open={linkModeTip && !linkModeMenu}
+                                onOpen={() => setLinkModeTip(Date.now() - linkModeMenuClosed.current > 600)}
+                                onClose={() => setLinkModeTip(false)}
+                            >
+                                <Select
+                                    open={linkModeMenu}
+                                    onOpen={() => {
+                                        setLinkModeTip(false);
+                                        setLinkModeMenu(true);
+                                    }}
+                                    onClose={() => {
+                                        linkModeMenuClosed.current = Date.now();
+                                        setLinkModeTip(false);
+                                        setLinkModeMenu(false);
+                                    }}
+                                    variant="standard"
+                                    size="small"
+                                    className="om-gutter-select"
+                                    value={linkMode}
+                                    onChange={e => chooseLinkMode(e.target.value)}
+                                    renderValue={v =>
+                                        `↔ ${t(v === 'write' ? 'linkModeWrite' : v === 'ask' ? 'linkModeAsk' : 'linkModeRead')}`
+                                    }
+                                >
+                                    <MenuItem value="read">{t('linkModeReadLong')}</MenuItem>
+                                    <MenuItem value="write">{t('linkModeWriteLong')}</MenuItem>
+                                    <MenuItem value="ask">{t('linkModeAskLong')}</MenuItem>
+                                </Select>
+                            </Tooltip>
+                            <LinkLegend
+                                dark={props.dark}
+                                hideOthers={!allLinks}
+                            />
                         </div>
                         <div style={{ gridColumn: 4, gridRow: 1 }}>{treeHeader('target')}</div>
                         <div
@@ -1479,6 +1792,19 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     enumsOf={id => enumNames.get(id)}
                                     onToggle={left.toggle}
                                     onSelect={(id, mode) => {
+                                        if (
+                                            mode === 'single' &&
+                                            selected?.side === 'source' &&
+                                            selected.id === id &&
+                                            sourceSelection.size <= 1
+                                        ) {
+                                            // a second click on the selected row clears the selection
+                                            setSelected(undefined);
+                                            setSelectedLink(undefined);
+                                            setPickedSource(undefined);
+                                            setSourceSelection(new Set());
+                                            return;
+                                        }
                                         setSelected({ side: 'source', id });
                                         setSelectedLink(undefined);
                                         setPickedSource(left.nodes.get(id)?.type === 'state' ? id : undefined);
@@ -1547,8 +1873,15 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                 width={GUTTER}
                                 selected={selectedLink}
                                 focusIds={focusIds}
+                                focusNode={focusNode}
+                                hideOthers={!allLinks}
                                 onSelect={link => {
-                                    setSelectedLink(link);
+                                    // a write line: Entf / "Verknüpfung lösen" removes the write ID
+                                    setSelectedLink({
+                                        sourceId: link.sourceId,
+                                        targetId: link.targetId,
+                                        ...(link.write ? { write: true } : {}),
+                                    });
                                     setSelected({ side: 'target', id: link.targetId });
                                 }}
                             />
@@ -1564,20 +1897,60 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     scrollRef={right.scrollRef}
                                     onScroll={right.onScroll}
                                     selectedId={selected?.side === 'target' ? selected.id : undefined}
+                                    selectedIds={targetSelection}
                                     linkCount={rightCounts}
                                     highlight={highlight}
                                     instances={instances}
                                     values={values}
                                     overridden={overridden}
+                                    plannedCustom={id => plannedCustom(state, id, objectOf)}
                                     enumsOf={id => enumNames.get(id)}
                                     changed={changed}
                                     onToggle={right.toggle}
-                                    onSelect={id => {
-                                        setSelected({ side: 'target', id });
+                                    onSelect={(id, mode) => {
                                         setSelectedLink(undefined);
+                                        if (mode === 'single') {
+                                            // a second click on the selected row clears the selection
+                                            const again =
+                                                selected?.side === 'target' &&
+                                                selected.id === id &&
+                                                targetSelection.size <= 1;
+                                            setSelected(again ? undefined : { side: 'target', id });
+                                            setTargetSelection(again ? new Set() : new Set([id]));
+                                            targetAnchor.current = id;
+                                            return;
+                                        }
+                                        setSelected({ side: 'target', id });
+                                        setTargetSelection(prev => {
+                                            if (mode === 'toggle') {
+                                                const next = new Set(prev);
+                                                if (selected?.side === 'target' && !prev.size) {
+                                                    next.add(selected.id);
+                                                }
+                                                if (next.has(id)) {
+                                                    next.delete(id);
+                                                } else {
+                                                    next.add(id);
+                                                }
+                                                return next;
+                                            }
+                                            const a = right.index.get(targetAnchor.current ?? id);
+                                            const b = right.index.get(id);
+                                            if (a !== undefined && b !== undefined) {
+                                                const [from, to] = a < b ? [a, b] : [b, a];
+                                                return new Set(right.rows.slice(from, to + 1).map(r => r.node.id));
+                                            }
+                                            return new Set([id]);
+                                        });
+                                        if (mode === 'toggle') {
+                                            targetAnchor.current = id;
+                                        }
                                     }}
                                     onSetRoot={id => editor.update(s => ({ ...s, targetRoot: id }))}
                                     onImport={running ? undefined : importFrom}
+                                    onUnimport={running ? undefined : id => unimportFrom(id)}
+                                    importable={importMarks.importable}
+                                    imported={importMarks.imported}
                                     onDrop={onDrop}
                                     onShowHistory={showHistory}
                                 />
@@ -1635,6 +2008,9 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     onSelect={(side, id) => setSelected({ side, id })}
                                     onShowHistory={showHistory}
                                     onImport={running || selected.side !== 'target' ? undefined : importFrom}
+                                    onUnimport={
+                                        running || selected.side !== 'target' ? undefined : id => unimportFrom(id)
+                                    }
                                     onDbName={
                                         running
                                             ? undefined
@@ -1700,7 +2076,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                 size="small"
                                 variant="outlined"
                                 title={`${pickedSource} → ${selected?.id}`}
-                                onClick={() => editor.update(s => addLink(s, pickedSource, selected.id))}
+                                onClick={() => linkSources([{ sourceId: pickedSource, targetId: selected.id }])}
                             >
                                 ↔ {t('link')}
                             </Button>
@@ -1710,11 +2086,11 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                 size="small"
                                 color="error"
                                 onClick={() => {
-                                    editor.update(s => removeLink(s, selectedLink));
+                                    editor.update(s => removeLine(s, selectedLink));
                                     setSelectedLink(undefined);
                                 }}
                             >
-                                ✕ {t('unlink')}
+                                ✕ {t(selectedLink.write ? 'writeIdRemoveShort' : 'unlink')}
                             </Button>
                         )}
                         <span className="om-muted">
@@ -1885,19 +2261,94 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                     selection={[...sourceSelection].filter(id => id !== state.sourceRoot)}
                     error={createMode.error}
                     onClose={() => setCreateMode(undefined)}
-                    onMirror={(basePath, sourceRoot, only) =>
-                        void mirror(sourceRoot, basePath, undefined, only)
-                            .then(error => {
-                                if (error) {
-                                    setCreateMode({ error });
+                    onMirror={(basePath, sourceRoot, only, links) =>
+                        void mirror(sourceRoot, basePath, undefined, only, links)
+                            .then(res => {
+                                if (res.error) {
+                                    setCreateMode({ error: res.error });
                                 } else {
                                     editor.update(s => ({ ...s, basePath, targetRoot: basePath }));
                                     setCreateMode(undefined);
+                                    setToast({
+                                        text: t('mirrored', { n: res.values, links: res.linked }),
+                                        severity: 'success',
+                                    });
                                 }
                             })
                             .catch(e => setCreateMode({ error: (e as Error).message }))
                     }
                 />
+            )}
+            {customsOf && (
+                <Dialog
+                    open
+                    fullWidth
+                    maxWidth="xl"
+                    onClose={() => setCustomsOf(undefined)}
+                    slotProps={{ paper: { className: 'om-customs-paper' } }}
+                >
+                    <DialogTitle className="om-customs-title">
+                        <span>
+                            {t('openCustoms')}: <code>{customsOf}</code>
+                        </span>
+                        <span className="om-spacer" />
+                        <Button
+                            size="small"
+                            onClick={() => window.open(customSettingsUrl(customsOf), '_blank', 'noopener')}
+                        >
+                            ↗ {t('openCustomsTab')}
+                        </Button>
+                        <Button
+                            size="small"
+                            onClick={() => setCustomsOf(undefined)}
+                        >
+                            ✕
+                        </Button>
+                    </DialogTitle>
+                    <iframe
+                        className="om-customs-frame"
+                        title={customsOf}
+                        src={customSettingsUrl(customsOf)}
+                    />
+                    <div className="om-muted om-customs-hint">{t('openCustomsReload')}</div>
+                </Dialog>
+            )}
+            {askLink && (
+                <Dialog
+                    open
+                    maxWidth="md"
+                    onClose={() => setAskLink(undefined)}
+                >
+                    <DialogTitle>{t('linkAsTitle')}</DialogTitle>
+                    <DialogContent>
+                        <DialogContentText>
+                            {askLink.links.length === 1
+                                ? `${askLink.links[0].sourceId} → ${askLink.links[0].targetId}`
+                                : t('linkAsMany', { n: askLink.links.length })}
+                        </DialogContentText>
+                    </DialogContent>
+                    <DialogActions className="om-ask-actions">
+                        <Button onClick={() => setAskLink(undefined)}>{t('cancel')}</Button>
+                        <Button
+                            onClick={() => {
+                                doLink(askLink.links, 'write', askLink.select);
+                                setAskLink(undefined);
+                            }}
+                        >
+                            {t('linkAsWrite')}
+                        </Button>
+                        <Button
+                            variant="contained"
+                            autoFocus
+                            onClick={() => {
+                                doLink(askLink.links, 'read', askLink.select);
+                                setAskLink(undefined);
+                            }}
+                        >
+                            {t('linkAsRead')}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
             )}
             {confirmAbort && (
                 <Dialog
@@ -2062,7 +2513,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
             )}
             <Snackbar
                 open={!!toast}
-                autoHideDuration={5000}
+                autoHideDuration={toast?.undo ? 10000 : 5000}
                 onClose={() => setToast(undefined)}
                 anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
             >
@@ -2070,6 +2521,21 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                     <Alert
                         severity={toast.severity}
                         onClose={() => setToast(undefined)}
+                        action={
+                            toast.undo ? (
+                                <Button
+                                    color="inherit"
+                                    size="small"
+                                    onClick={() => {
+                                        const undo = toast.undo!;
+                                        setToast(undefined);
+                                        undo();
+                                    }}
+                                >
+                                    {t('undo')}
+                                </Button>
+                            ) : undefined
+                        }
                     >
                         {toast.text}
                     </Alert>

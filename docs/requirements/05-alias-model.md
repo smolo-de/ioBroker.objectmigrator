@@ -56,7 +56,7 @@ Beispiel Alias-State:
 | AM-09 | Alias-Instanz konfigurierbar (`alias.0` ist Standard; js-controller unterstützt nur `alias.0`, das wird geprüft) |
 | AM-10 | Rollen nach Type-Detector-Konventionen, damit material, lovelace, iot und devices das virtuelle Gerät erkennen |
 | AM-11 | Alias-Geräte, die vom Migrator angelegt wurden, werden in `native.migrator` markiert, damit Health-Check und Aufräumen nur eigene Objekte betreffen |
-| AM-12 | **Einlesen** (FR-56): je Alias-State eine Verknüpfung von der Lese-ID; eine abweichende Schreib-ID wird als Schreib-Quelle gemerkt und beim Umhängen beibehalten (`alias.id = { read, write }`). Vorhandene Formeln werden als Experten-Umrechnung übernommen. Eingelesene Ziele haben „Historie übernehmen“ und „Einstellungen übernehmen“ zunächst **aus** – das Umhängen allein braucht keine History-Migration (AM-08) |
+| AM-12 | **Einlesen** (FR-56): je Alias-State eine Verknüpfung von der Lese-ID; eine abweichende Schreib-ID wird als Schreib-Quelle gemerkt und bleibt erhalten, solange die Lese-ID die Live-Quelle ist (`alias.id = { read, write }`); wird eine andere Quelle live, entfällt sie. Sie wird angezeigt (ME-19) und lässt sich im Editor setzen, ändern oder entfernen – auch per Ziehen (ME-21). Vorhandene Formeln werden als Experten-Umrechnung übernommen. Eingelesene Ziele haben „Historie übernehmen“ und „Einstellungen übernehmen“ zunächst **aus** – das Umhängen allein braucht keine History-Migration (AM-08) |
 | AM-13 | Eine Quelle, die schon mit einem anderen Ziel verknüpft ist, wird nicht ein zweites Mal verknüpft (ME-13); das Einlesen meldet solche Fälle |
 
 ## 3. Lebenszyklus eines Alias-States

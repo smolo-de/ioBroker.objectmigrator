@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { t, language } from '../i18n';
+import { openCustomSettings } from '../adminLink';
 import React from 'react';
-import { language, t } from '../i18n';
 import { customIcons, nodeName, type Row } from '../model';
 
 /** Row height in px - fixed, so the link lines can be computed from the row index */
@@ -42,13 +43,21 @@ export interface ObjectTreeProps {
     values: Record<string, ioBroker.State | null | undefined>;
     /** `targetId|customKey` with an override */
     overridden: Set<string>;
+    /** planned adapter settings of a new object - shown as icons like those of existing objects */
+    plannedCustom?: (id: string) => Record<string, unknown> | undefined;
     onToggle: (id: string) => void;
     onSelect: (id: string, mode: 'single' | 'toggle' | 'range') => void;
     onSetRoot: (id: string) => void;
     onDrop: (payload: DragPayload, targetRow: Row) => void;
     onShowHistory: (id: string) => void;
-    /** target tree: read the existing alias mappings of a node in (FR-56) */
+    /** target tree: read the existing alias mappings of a row in (FR-56) */
     onImport?: (id: string) => void;
+    /** target tree: take the read-in mappings of a row back (FR-56) */
+    onUnimport?: (id: string) => void;
+    /** rows with an existing mapping that is not read in yet (also their parents) */
+    importable?: Set<string>;
+    /** rows with read-in mappings (also their parents) */
+    imported?: Set<string>;
     /** Source states with settings that are not linked (ME-16) */
     isUnlinkedWithSettings?: (id: string) => boolean;
     /** Existing objects with pending setting changes */
@@ -92,11 +101,14 @@ function formatValue(state: ioBroker.State | null | undefined, unit?: string): s
  * @param props.obj
  * @param props.instances
  * @param props.overridden
+ * @param props.objectId
  */
 export function CustomIcons(props: {
     obj: Row['node']['obj'];
     instances: Record<string, InstanceInfo>;
     overridden?: (key: string) => boolean;
+    /** existing object: a click opens its original adapter settings in the admin */
+    objectId?: string;
 }): React.JSX.Element | null {
     const icons = customIcons(props.obj, props.instances);
     if (!icons.length) {
@@ -119,8 +131,16 @@ export function CustomIcons(props: {
                 return (
                     <span
                         key={icon.key}
-                        className={cls}
-                        title={title}
+                        className={`${cls} ${props.objectId ? 'om-clickable' : ''}`}
+                        title={props.objectId ? `${title}\n\n${t('openCustomsHelp')}` : title}
+                        onClick={
+                            props.objectId
+                                ? e => {
+                                      e.stopPropagation();
+                                      openCustomSettings(props.objectId!, e.ctrlKey || e.metaKey);
+                                  }
+                                : undefined
+                        }
                     >
                         {inst?.icon ? (
                             <img
@@ -295,22 +315,43 @@ export function ObjectTree(props: ObjectTreeProps): React.JSX.Element {
                                     ⤓ {t('asRoot')}
                                 </span>
                             )}
-                            {props.onImport && !node.draft && node.id.startsWith('alias.') && (
+                            {props.onUnimport && props.imported?.has(node.id) && (
                                 <span
-                                    className="om-root-btn"
-                                    title={t('importAliasesHelp')}
+                                    className="om-row-icon"
+                                    title={`${t('unimport')}: ${t('unimportHelp')}`}
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        props.onUnimport!(node.id);
+                                    }}
+                                >
+                                    ↶
+                                </span>
+                            )}
+                            {props.onImport && props.importable?.has(node.id) && (
+                                <span
+                                    className="om-row-icon"
+                                    title={`${t('importAliases')}: ${t('importAliasesHelp')}`}
                                     onClick={e => {
                                         e.stopPropagation();
                                         props.onImport!(node.id);
                                     }}
                                 >
-                                    ⇠ {t('importAliases')}
+                                    ⇠
                                 </span>
                             )}
                             <CustomIcons
-                                obj={node.obj}
+                                obj={
+                                    node.draft && props.plannedCustom
+                                        ? {
+                                              ...node.obj,
+                                              type: node.obj?.type ?? 'state',
+                                              common: { ...node.obj?.common, custom: props.plannedCustom(node.id) },
+                                          }
+                                        : node.obj
+                                }
                                 instances={props.instances}
                                 overridden={key => props.overridden.has(`${node.id}|${key}`)}
+                                objectId={node.draft ? undefined : node.id}
                             />
                             {isState && dbName && (
                                 <span

@@ -27,7 +27,7 @@ rechts daneben die Sprache **DE/EN**.
 | Bereich | Inhalt |
 |---|---|
 | **Quelle** (links) | Objektbaum ab einer frei wählbaren Wurzel oder **„Alle Objekte“** (ganzer Objektbaum; eine Adapter-Instanz wird erst beim Aufklappen geladen). „↑“ geht eine Ebene hoch, über einer Instanz zu „Alle Objekte“; beim Darüberfahren erscheint an jedem Knoten „⤓ als Wurzel“ (oder Doppelklick). Strg/Shift-Klick markiert mehrere Objekte |
-| **Linien** (Mitte) | Verknüpfungen Quelle → Ziel. Grün = passt, orange = andere Einheit/Rolle, rot = anderer Typ, grau = migriert, grau gestrichelt = eingelesen und unverändert. Bei zugeklappten Knoten gebündelt mit Anzahl. **„? Linien“** über den Linien erklärt alle Linienarten und Markierungen |
+| **Linien** (Mitte) | Verknüpfungen Quelle → Ziel. Grün = passt, orange = andere Einheit/Rolle, rot = anderer Typ, grau = migriert, grau gestrichelt = eingelesen und unverändert, gepunktet mit Pfeil = Schreib-ID (der Alias schreibt dorthin). Bei zugeklappten Knoten gebündelt mit Anzahl. Ist eine Zeile markiert, werden ihre Linien hervorgehoben (bei einem Knoten: die der Werte darunter) und die übrigen blasser; **Esc** oder ein zweiter Klick auf die Zeile hebt die Auswahl auf. Über den Linien: Schalter **„Alle Verbindungen“** (aus: bei einer Auswahl sind nur deren Linien zu sehen), **„↔ Read State/Write State/Individuell“** (was das Ziehen auf einen Alias setzt, siehe unten) und **„? Linien“** mit der Erklärung aller Linienarten und Markierungen |
 | **Ziel** (rechts) | Zielbaum mit Entwürfen (kursiv, „Entwurf“) und vorhandenen Objekten. „✎ geändert“ markiert vorhandene Objekte mit offenen Änderungen |
 | **Eigenschaften** | Details der markierten Zeile; oben rechts ★ als Vorlage speichern und 🗑 aus dem Entwurf entfernen |
 
@@ -37,10 +37,38 @@ Die Breite der Bereiche lässt sich an den Trennern verschieben.
 
 1. **Quelle wählen:** links die Wurzel setzen, z. B. die Instanz des alten Adapters.
 2. **Erstellungsmodus:** Basispfad festlegen (z. B. `alias.0.Geraete.Thermostat`) → „Spiegeln“.
-   Die Struktur wird als Entwurf angelegt, jeder State mit seiner Quelle verknüpft. Mit markierten
-   Objekten links wird nur die Auswahl gespiegelt.
+   Die Struktur wird als Entwurf angelegt. Mit markierten Objekten links wird nur die Auswahl
+   gespiegelt. Unter **„Verknüpfen“** wählst du, welche gespiegelten Werte gleich eine Linie zu ihrer
+   Quelle bekommen:
+   - **jeden gespiegelten Wert** (Standard)
+   - **nur Werte mit Adapter-Einstellungen** (Historie, influxdb, lovelace …): Bei vielen Werten
+     – z. B. 450 – sind nur die verknüpft, deren Historie und Einstellungen übernommen werden sollen
+   - **keine**: nur die Struktur; verknüpft wird danach per Ziehen
+
+   Werte ohne Verknüpfung entstehen ohne Quelle (siehe „Neue Objekte anlegen“). Die Wahl merkt sich
+   der Browser.
 3. **Neuen Adapter verknüpfen:** Knoten links auf Knoten rechts ziehen (Zuordnung nach Pfad oder
    Name) oder State auf State. Mehrere Quellen pro Ziel werden zusammengeführt.
+
+   **Read State oder Write State:** Die Auswahl **„↔“** über den Linien legt fest, was das Ziehen auf
+   einen Alias setzt:
+   - **Read-State-Modus** (Standard): eine weitere Quelle (`alias.id`), die Historie wird zusammengeführt
+   - **Write-State-Modus**: der Alias liest weiter von seinem Read State und schreibt auf das gezogene
+     Objekt (`alias.id = { read, write }`, z. B. getrennte Datenbausteine für Lesen und Schreiben).
+     Ein bestehender Alias, der noch nicht eingelesen ist, behält seinen Read State (seine Zuordnung
+     wird dabei eingelesen). Hat der Alias noch gar keinen Read State, wartet der Write State auf den
+     nächsten, der verknüpft wird („Read State fehlt noch“). Ist das gezogene Objekt schon der Read
+     State, wird es übersprungen
+   - **Individuelle Entscheidung**: Beim Ziehen auf einen Alias fragt der Editor „Als Alias-Read-State
+     setzen“ oder „Als Alias-Write-State setzen“ (nicht, wenn das Objekt schon sein Read State ist);
+     beim Ziehen eines Knotens gilt die Auswahl für alle Werte
+
+   Die Write-State-Linie (gepunktet mit Pfeil) lässt sich anklicken und mit **Entf** oder
+   **„✕ Write State entfernen“** wieder entfernen.
+
+   Im Panel steht die Schreib-ID unter der Lese-Quelle („✎ schreibt auf …“, 🔍 ändern, ✕ entfernen) oder
+   lässt sich dort mit **„✎ Schreib-ID setzen“** auswählen. Sie gehört zu dieser Lese-Quelle: Wird eine
+   andere Quelle live, gilt sie nicht mehr. Die Auswahl merkt sich der Browser.
 4. **Aufräumen:** rechts umbenennen, verschieben (ziehen), entfernen, neue Werte anlegen.
 5. **Prüfen** → **Schreiben**.
 
@@ -150,20 +178,29 @@ sollen künftig vom neuen Adapter kommen:
 ## Bestehende Zuordnungen einlesen
 
 Ein Alias-Gerät, das es schon gibt (von Hand angelegt oder aus einem früheren Lauf), lässt sich in den
-Editor holen: rechts mit der Maus über den Knoten fahren → **„⇠ einlesen“** (oder im Panel des
-Knotens) – auch an der Wurzel und an einzelnen Werten. Jede `alias.id` wird zur Linie zu ihrer Quelle.
+Editor holen: das Symbol **⇠** rechts in der Zeile (oder „⇠ einlesen“ im Panel) – an jedem Knoten,
+unter dem es noch nicht eingelesene Zuordnungen gibt, auch an der Wurzel und an einzelnen Werten. Jede `alias.id` wird zur Linie zu ihrer Quelle.
 Links werden die Quellen aufgeklappt; liegen sie außerhalb der linken Wurzel, wird die Wurzel so weit
 erweitert, dass alle zu sehen sind – bei Quellen in mehreren Adaptern bis **„Alle Objekte“**:
 
 - **gestrichelt grau** = eingelesen und unverändert – „Schreiben“ macht dafür nichts
 - Formeln (`alias.read`/`alias.write`) stehen als Experten-Umrechnung im Panel, eine getrennte
-  Schreib-ID (`alias.id = { read, write }`) bleibt erhalten
+  Schreib-ID (`alias.id = { read, write }`) bleibt erhalten, solange die Lese-Quelle live ist. Sie
+  hat eine eigene Linie (gepunktet, Pfeil zum Objekt, auf das geschrieben wird); im Panel steht sie
+  unter der Quelle („✎ schreibt auf …“), und das Objekt links zeigt, welcher Alias dorthin schreibt
 - Historie und Einstellungen sind bei eingelesenen Werten zunächst **aus** – für das reine Umhängen
   braucht es keine History-Migration. Im Panel lassen sie sich einschalten.
 
 Ändern wie gewohnt: eine andere Quelle auf den Alias ziehen (die zuletzt verknüpfte wird `alias.id`),
 Umrechnung ändern, Verknüpfung lösen. Die Linie wird dann normal gezeichnet, „Prüfen“ zeigt genau die
 Änderung. Im Panel eines Alias steht immer, worauf er gerade zeigt.
+
+**Zurücknehmen:** Direkt nach dem Einlesen bietet die Meldung **„Rückgängig“** an (auch die erweiterte
+linke Wurzel wird zurückgesetzt). Später das Symbol **↶** in der Zeile (an jedem Wert und Knoten mit eingelesenen Zuordnungen) oder
+„↶ Einlesen zurücknehmen“ im Panel:
+Die eingelesenen Zuordnungen dort und darunter verlassen den Plan wieder. Seitdem geänderte bleiben
+(die Meldung nennt ihre Anzahl) – sie lassen sich einzeln lösen (Linie auswählen, Entf). Strg+Z
+funktioniert wie bei jeder Aktion.
 
 ## DB-Namen
 
