@@ -18,7 +18,7 @@ import {
     Tooltip,
 } from '@mui/material';
 import React from 'react';
-import { normalizeIdPart } from '../../src/lib/alias/createMode';
+import { normalizeIdPart, hasAdapterSettings } from '../../src/lib/alias/createMode';
 import type { CheckResult, RunLogEntry } from '../../src/lib/migration/types';
 import { CheckDialog, CreateModeDialog } from './components/Dialogs';
 import { ApplyTemplateDialog, SaveTemplateDialog } from './components/TemplateDialogs';
@@ -1127,7 +1127,13 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         }
         // dropped into an existing node: its own draft and its parents stay as they are
         const drafts = keepBelow ? res.drafts.filter(d => d.id.startsWith(`${keepBelow}.`)) : res.drafts;
-        const only = links === 'all' ? undefined : new Set(links === 'settings' ? (res.withSettings ?? []) : []);
+        // an older backend does not send withSettings: decided here from the loaded source objects
+        const withSettings =
+            res.withSettings ??
+            drafts
+                .filter(d => d.type === 'state' && d.sourceId && hasAdapterSettings(objectOf(d.sourceId)))
+                .map(d => d.sourceId!);
+        const only = links === 'all' ? undefined : new Set(links === 'settings' ? withSettings : []);
         editor.update(s => applyMirror(s, drafts, only));
         right.setExpanded(prev => new Set([...prev, ...drafts.filter(d => d.type !== 'state').map(d => d.id)]));
         const values = drafts.filter(d => d.type === 'state' && d.sourceId);
