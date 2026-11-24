@@ -2174,6 +2174,77 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                 >
                                     {t('savePlan')}
                                 </Button>
+                                <Tooltip title={t('exportPlanHelp')}>
+                                    <Button
+                                        size="small"
+                                        onClick={() => {
+                                            // the editor state as a file - a backup independent of the instance
+                                            const file = {
+                                                format: 'objectmigrator-plan',
+                                                version: 1,
+                                                exportedAt: new Date().toISOString(),
+                                                plan: state,
+                                            };
+                                            const url = URL.createObjectURL(
+                                                new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' }),
+                                            );
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `objectmigrator-plan-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+                                            a.click();
+                                            setTimeout(() => URL.revokeObjectURL(url), 1000);
+                                        }}
+                                    >
+                                        ⤓ {t('exportPlan')}
+                                    </Button>
+                                </Tooltip>
+                                <Tooltip title={t('importPlanHelp')}>
+                                    <Button
+                                        size="small"
+                                        component="label"
+                                    >
+                                        ⤒ {t('importPlan')}
+                                        <input
+                                            type="file"
+                                            accept="application/json,.json"
+                                            hidden
+                                            onChange={e => {
+                                                const input = e.target;
+                                                const file = input.files?.[0];
+                                                input.value = '';
+                                                if (!file) {
+                                                    return;
+                                                }
+                                                void file
+                                                    .text()
+                                                    .then(text => {
+                                                        const data = JSON.parse(text) as {
+                                                            plan?: EditorState;
+                                                        } & EditorState;
+                                                        const plan = data.plan ?? data;
+                                                        if (
+                                                            !plan ||
+                                                            !Array.isArray(plan.links) ||
+                                                            !Array.isArray(plan.drafts) ||
+                                                            typeof plan.options !== 'object'
+                                                        ) {
+                                                            throw new Error(t('importPlanInvalid'));
+                                                        }
+                                                        // undoable like every other change - saved with "Plan speichern"
+                                                        editor.update(() => ({ ...state, ...plan }));
+                                                        setToast({
+                                                            text: t('importPlanDone', {
+                                                                links: plan.links.length,
+                                                                drafts: plan.drafts.length,
+                                                            }),
+                                                            severity: 'success',
+                                                        });
+                                                    })
+                                                    .catch(fail);
+                                            }}
+                                        />
+                                    </Button>
+                                </Tooltip>
                                 <Button
                                     size="small"
                                     variant="outlined"

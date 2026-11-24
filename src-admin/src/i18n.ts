@@ -262,6 +262,14 @@ const de = {
     manualSource: 'Quelle (ID) eingeben',
     selected: '{n} markiert',
     openCustoms: 'Original-Einstellungen',
+    exportPlan: 'Export',
+    exportPlanHelp:
+        'Lädt den aktuellen Plan (Entwurf, Verknüpfungen, Einstellungen) als JSON-Datei herunter – eine Sicherung unabhängig von der Instanz',
+    importPlan: 'Import',
+    importPlanHelp:
+        'Lädt einen exportierten Plan in den Editor. Rückgängig mit Strg+Z; gespeichert wird er erst mit „Plan speichern“',
+    importPlanInvalid: 'Die Datei ist kein exportierter objectmigrator-Plan',
+    importPlanDone: 'Plan importiert: {links} Verknüpfungen, {drafts} Entwurfsobjekte – mit „Plan speichern“ sichern',
     openCustomsTab: 'in neuem Tab',
     openCustomsReload:
         'Änderungen hier speichert der Admin direkt. Danach den Editor neu laden (F5), damit er sie sieht.',
@@ -646,6 +654,13 @@ const en: Texts = {
     manualSource: 'Enter source (ID)',
     selected: '{n} selected',
     openCustoms: 'Original settings',
+    exportPlan: 'Export',
+    exportPlanHelp:
+        'Downloads the current plan (drafts, links, settings) as a JSON file – a backup independent of the instance',
+    importPlan: 'Import',
+    importPlanHelp: 'Loads an exported plan into the editor. Undo with Ctrl+Z; it is saved only with "Save plan"',
+    importPlanInvalid: 'The file is no exported objectmigrator plan',
+    importPlanDone: 'Plan imported: {links} links, {drafts} draft objects – keep it with "Save plan"',
     openCustomsTab: 'in a new tab',
     openCustomsReload: 'The admin saves changes made here directly. Reload the editor afterwards (F5) so it sees them.',
     openCustomsHelp:
