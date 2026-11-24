@@ -141,6 +141,27 @@ describe('history/transfer', () => {
         expect(new Set(backend.data.tgt.map(x => x.ts)).size).to.equal(24 * 21);
     });
 
+    it('a cached source range does not lose the newest values of a source that is still logging', async () => {
+        const backend = new FakeBackend();
+        const now = Date.now();
+        // 3 values, the last one newer than the cached range says
+        backend.data.src = [
+            { ts: now - 3 * HOUR, val: 1 },
+            { ts: now - 20 * 60_000, val: 2 },
+            { ts: now - 60_000, val: 3 },
+        ];
+        const task: TransferTask = { target: 'tgt', sources: [{ id: 'src' }], overlap: { type: 'all' } };
+        const res = await runTransfer(backend, task, {
+            chunkSize: 5000,
+            pauseMs: 0,
+            sleep: noSleep,
+            // the range as cached 20 minutes ago
+            ranges: { src: { start: now - 3 * HOUR, end: now - 20 * 60_000, count: 2 }, tgt: undefined },
+        });
+        expect(res.stats.written).to.equal(3);
+        expect(backend.data.tgt.map(x => x.val)).to.deep.equal([1, 2, 3]);
+    });
+
     it('keeps existing target values and only adds missing ones', async () => {
         const backend = new FakeBackend();
         backend.data.src = series(10, day0, HOUR);

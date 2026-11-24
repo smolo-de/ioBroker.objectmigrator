@@ -599,7 +599,7 @@ export class MigrationRunner {
         phase('DB-Namen');
         if ((plan.tasks ?? []).length) {
             this.adapter.log.info(
-                `Prüfen: lese die Statistik von ${this.backend.instance} (getDpStatistics) – kann bei großer Historie dauern`,
+                `Prüfen: lese die Historie von ${this.backend.instance} (Zeitraum und Anzahl je Datenpunkt)`,
             );
         }
         // history
@@ -621,6 +621,8 @@ export class MigrationRunner {
             );
         // the targets fresh before "Schreiben" (the rollback relies on them); the sources only get new live
         // values, their ranges may be older - so the slow full statistics is not read again right before writing
+        // only the reason of this check is logged
+        (this.backend as { lastFallback?: string }).lastFallback = undefined;
         const ranges =
             result.historyAlive && plan.tasks?.length
                 ? {

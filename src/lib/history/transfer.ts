@@ -34,6 +34,9 @@ export function nextDay(dayStart: number): number {
     return d.getTime();
 }
 
+/** A source whose last value is this recent may have newer values than its (cached) range says */
+export const RECENT_MS = 40 * 60_000;
+
 /** Days read with one request per data point - fewer requests, the history adapter reads its day files */
 export const WINDOW_DAYS = 7;
 
@@ -140,7 +143,14 @@ export async function runTransfer(
     const before = known[task.target];
     result.targetRangeBefore = before ? { start: before.start, end: before.end } : undefined;
 
-    const range = taskRange(Object.values(sourceRanges), task.range);
+    // the source ranges may come from a cache (up to 30 min, MigrationRunner): a source that was still
+    // logging then can have newer values now - read it up to now, so nothing of that time is missed
+    const recent = Date.now() - RECENT_MS;
+    const readRanges: Record<string, TimeRange | undefined> = {};
+    for (const [id, r] of Object.entries(sourceRanges)) {
+        readRanges[id] = r && r.end >= recent ? { start: r.start, end: Math.max(r.end, Date.now()) } : r;
+    }
+    const range = taskRange(Object.values(readRanges), task.range);
     if (!range) {
         return result;
     }
@@ -190,7 +200,7 @@ export async function runTransfer(
         const entries: Record<string, HistoryEntry[]> = {};
         let any = false;
         for (const source of activeSources) {
-            const r = sourceRanges[source.id]!;
+            const r = readRanges[source.id]!;
             if (r.end < window.start || r.start > window.end) {
                 continue;
             }
