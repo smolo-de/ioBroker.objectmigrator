@@ -74,6 +74,8 @@ class Objectmigrator extends utils.Adapter {
     callback();
   }
   /** Message API for the admin tab (07 §3) */
+  /** running long commands (job.start / job.result) */
+  jobs = /* @__PURE__ */ new Map();
   handlers = {
     // ---- history
     "history.status": async () => ({
@@ -165,6 +167,45 @@ class Objectmigrator extends utils.Adapter {
     },
     // ---- "Prüfen" / "Schreiben" (06 §5)
     "plan.check": (msg) => this.runner.check(msg),
+    // ---- long commands as a job: the admin answers sendTo with "timeout" after a while, so the tab
+    // starts the command and asks for the result until it is there
+    // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
+    "job.start": async (msg) => {
+      var _a;
+      const command = String((_a = msg == null ? void 0 : msg.command) != null ? _a : "");
+      if (!["plan.check", "plan.write"].includes(command)) {
+        throw new Error(`Command ${command} cannot run as a job`);
+      }
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const job = { done: false, at: Date.now() };
+      this.jobs.set(id, job);
+      void Promise.resolve(this.handlers[command](msg.message)).then((data) => Object.assign(job, { done: true, data })).catch((e) => {
+        this.log.warn(`${command} failed: ${e.message}`);
+        Object.assign(job, { done: true, error: e.message });
+      });
+      for (const [key, j] of this.jobs) {
+        if (Date.now() - j.at > 6 * 36e5) {
+          this.jobs.delete(key);
+        }
+      }
+      return { id };
+    },
+    // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
+    "job.result": async (msg) => {
+      const job = this.jobs.get(String(msg == null ? void 0 : msg.id));
+      if (!job) {
+        throw new Error("Unknown job - was the instance restarted?");
+      }
+      if (job.done) {
+        this.jobs.delete(String(msg.id));
+      }
+      return {
+        done: job.done,
+        data: job.data,
+        error: job.error,
+        seconds: Math.round((Date.now() - job.at) / 1e3)
+      };
+    },
     "plan.write": (msg) => this.runner.write(msg),
     "run.cancel": () => {
       this.runner.cancel();
