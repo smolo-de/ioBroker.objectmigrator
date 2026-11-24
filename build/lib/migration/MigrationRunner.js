@@ -481,7 +481,7 @@ class MigrationRunner {
     phase("DB-Namen");
     if (((_x = plan.tasks) != null ? _x : []).length) {
       this.adapter.log.info(
-        `Pr\xFCfen: lese die Statistik von ${this.backend.instance} (getDpStatistics) \u2013 kann bei gro\xDFer Historie dauern`
+        `Pr\xFCfen: lese die Historie von ${this.backend.instance} (Zeitraum und Anzahl je Datenpunkt)`
       );
     }
     if (((_z = (_y = plan.tasks) == null ? void 0 : _y.length) != null ? _z : 0) > 0 && !result.historyAlive) {
@@ -498,6 +498,7 @@ class MigrationRunner {
         `Pr\xFCfen: Historie ${index + 1} ${id}: ${(_a2 = range == null ? void 0 : range.count) != null ? _a2 : 0} Eintr\xE4ge${range ? ` (${new Date(range.start).toISOString().slice(0, 10)} \u2013 ${new Date(range.end).toISOString().slice(0, 10)})` : ""}`
       );
     };
+    this.backend.lastFallback = void 0;
     const ranges = result.historyAlive && ((_C = plan.tasks) == null ? void 0 : _C.length) ? {
       ...await this.backend.getRanges(
         sourceIds,

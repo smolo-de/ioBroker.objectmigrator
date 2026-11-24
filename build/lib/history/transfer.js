@@ -18,6 +18,7 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var transfer_exports = {};
 __export(transfer_exports, {
+  RECENT_MS: () => RECENT_MS,
   WINDOW_DAYS: () => WINDOW_DAYS,
   nextDay: () => nextDay,
   nextWindow: () => nextWindow,
@@ -39,6 +40,7 @@ function nextDay(dayStart) {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
+const RECENT_MS = 40 * 6e4;
 const WINDOW_DAYS = 7;
 function nextWindow(dayStart) {
   let next = dayStart;
@@ -72,7 +74,12 @@ async function runTransfer(backend, task, options) {
   }
   const before = known[task.target];
   result.targetRangeBefore = before ? { start: before.start, end: before.end } : void 0;
-  const range = taskRange(Object.values(sourceRanges), task.range);
+  const recent = Date.now() - RECENT_MS;
+  const readRanges = {};
+  for (const [id, r] of Object.entries(sourceRanges)) {
+    readRanges[id] = r && r.end >= recent ? { start: r.start, end: Math.max(r.end, Date.now()) } : r;
+  }
+  const range = taskRange(Object.values(readRanges), task.range);
   if (!range) {
     return result;
   }
@@ -113,7 +120,7 @@ async function runTransfer(backend, task, options) {
     const entries = {};
     let any = false;
     for (const source of activeSources) {
-      const r = sourceRanges[source.id];
+      const r = readRanges[source.id];
       if (r.end < window.start || r.start > window.end) {
         continue;
       }
@@ -149,6 +156,7 @@ async function runTransfer(backend, task, options) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  RECENT_MS,
   WINDOW_DAYS,
   nextDay,
   nextWindow,
