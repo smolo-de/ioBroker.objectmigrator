@@ -447,6 +447,21 @@ export class MigrationRunner {
      * @param options.fresh - do not use cached history ranges
      */
     public async check(plan: MigrationPlan, options: { fresh?: boolean } = {}): Promise<CheckResult> {
+        // extended log (info): every phase with its duration - shows where a large check hangs
+        const t0 = Date.now();
+        let tPhase = t0;
+        const phase = (name: string, detail = ''): void => {
+            const now = Date.now();
+            this.adapter.log.info(
+                `Prüfen: ${name}${detail ? ` (${detail})` : ''} – ${now - tPhase} ms, gesamt ${now - t0} ms`,
+            );
+            tPhase = now;
+        };
+        this.adapter.log.info(
+            `Prüfen gestartet: ${plan.drafts?.length ?? 0} Objekte, ${plan.mappings?.length ?? 0} Einstellungen, ${
+                plan.aliases?.length ?? 0
+            } Aliase, ${plan.tasks?.length ?? 0} Historien${options.fresh ? ', frische Statistik' : ''}`,
+        );
         const result: CheckResult = {
             ok: true,
             errors: [],
@@ -466,6 +481,7 @@ export class MigrationRunner {
             return result;
         }
 
+        phase('Status History-Adapter und Plan-Validierung');
         // objects
         const draftIds = new Set<string>();
         for (const draft of plan.drafts ?? []) {
@@ -487,6 +503,7 @@ export class MigrationRunner {
             }
         }
 
+        phase('Objekte', `${plan.drafts?.length ?? 0}`);
         // settings
         const instances = await this.instanceStatus();
         const enums = await this.adapter.getForeignObjectsAsync('enum.*', 'enum');
@@ -522,6 +539,7 @@ export class MigrationRunner {
             result.settings.push({ ...mapping, plan: settingsPlan, enumChanges });
         }
 
+        phase('Einstellungen', `${plan.mappings?.length ?? 0}`);
         // aliases of existing objects (remap, conversion)
         for (const update of plan.aliases ?? []) {
             if (!update.targetId.startsWith('alias.')) {
@@ -542,6 +560,7 @@ export class MigrationRunner {
             });
         }
 
+        phase('Aliase', `${plan.aliases?.length ?? 0}`);
         // DB names (FR-57)
         if (plan.dbNames?.length) {
             result.dbNames = [];
@@ -575,6 +594,12 @@ export class MigrationRunner {
             }
         }
 
+        phase('DB-Namen');
+        if ((plan.tasks ?? []).length) {
+            this.adapter.log.info(
+                `Prüfen: lese die Statistik von ${this.backend.instance} (getDpStatistics) – kann bei großer Historie dauern`,
+            );
+        }
         // history
         if ((plan.tasks?.length ?? 0) > 0 && !result.historyAlive) {
             result.errors.push({ code: 'historyNotRunning', args: { instance: this.backend.instance } });
@@ -626,6 +651,10 @@ export class MigrationRunner {
         }
 
         result.ok = result.errors.length === 0;
+        phase('Historie', `${plan.tasks?.length ?? 0}`);
+        this.adapter.log.info(
+            `Prüfen fertig in ${Date.now() - t0} ms: ${result.errors.length} Fehler, ${result.warnings.length} Warnungen`,
+        );
         return result;
     }
 

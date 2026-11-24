@@ -86,7 +86,11 @@ export class Connection {
             throw new AdapterError(`${this.instance} does not answer - is the instance running?`);
         }
         if (!answer.ok) {
-            throw new AdapterError(answer.error?.message ?? 'unknown error');
+            // an answer of the admin itself (e.g. a timeout of sendTo) has no error message of ours
+            throw new AdapterError(
+                answer.error?.message ??
+                    `${command}: unexpected answer ${JSON.stringify(answer).slice(0, 300)} – see the log of ${this.instance}`,
+            );
         }
         return answer.data as T;
     }
