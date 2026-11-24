@@ -49,6 +49,8 @@ const RUN_DIR = 'runs';
 const BACKUP_DIR = 'backups';
 /** "Prüfen" may use history ranges of the last 2 minutes - "Schreiben" always reads them fresh */
 const CHECK_RANGES_MAX_AGE = 120_000;
+/** Ranges of the sources before "Schreiben": they only get new live values - no new full scan right before */
+const SOURCE_RANGES_MAX_AGE = 30 * 60_000;
 
 /**
  * File name of a plan or template: letters, digits and . _ - only
@@ -604,18 +606,31 @@ export class MigrationRunner {
         if ((plan.tasks?.length ?? 0) > 0 && !result.historyAlive) {
             result.errors.push({ code: 'historyNotRunning', args: { instance: this.backend.instance } });
         }
-        const rangeIds = (plan.tasks ?? []).flatMap(t => [t.target, ...t.sources.map(s => s.id)]);
+        const targetIds = [...new Set((plan.tasks ?? []).map(t => t.target))];
+        const sourceIds = [...new Set((plan.tasks ?? []).flatMap(t => t.sources.map(s => s.id)))].filter(
+            id => !targetIds.includes(id),
+        );
+        const rangeIds = [...targetIds, ...sourceIds];
+        const logRange = (id: string, range: DataRange | undefined, index: number): void =>
+            this.adapter.log.info(
+                `Prüfen: Historie ${index + 1} ${id}: ${range?.count ?? 0} Einträge${
+                    range
+                        ? ` (${new Date(range.start).toISOString().slice(0, 10)} – ${new Date(range.end).toISOString().slice(0, 10)})`
+                        : ''
+                }`,
+            );
+        // the targets fresh before "Schreiben" (the rollback relies on them); the sources only get new live
+        // values, their ranges may be older - so the slow full statistics is not read again right before writing
         const ranges =
             result.historyAlive && plan.tasks?.length
-                ? await this.backend.getRanges(rangeIds, options.fresh ? 0 : CHECK_RANGES_MAX_AGE, (id, range, index) =>
-                      this.adapter.log.info(
-                          `Prüfen: Historie ${index + 1}/${rangeIds.length} ${id}: ${range?.count ?? 0} Einträge${
-                              range
-                                  ? ` (${new Date(range.start).toISOString().slice(0, 10)} – ${new Date(range.end).toISOString().slice(0, 10)})`
-                                  : ''
-                          }`,
-                      ),
-                  )
+                ? {
+                      ...(await this.backend.getRanges(
+                          sourceIds,
+                          options.fresh ? SOURCE_RANGES_MAX_AGE : CHECK_RANGES_MAX_AGE,
+                          logRange,
+                      )),
+                      ...(await this.backend.getRanges(targetIds, options.fresh ? 0 : CHECK_RANGES_MAX_AGE, logRange)),
+                  }
                 : {};
         const fallback = (this.backend as { lastFallback?: string }).lastFallback;
         if (fallback) {

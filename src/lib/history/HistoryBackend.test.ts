@@ -42,8 +42,8 @@ describe('history/HistoryAdapterBackend', () => {
             'empty.0.x': undefined,
             missing: undefined,
         });
-        // an adapter without the total of getRawEntries: the full statistics
-        expect(t.calls).to.deep.equal(['getRawEntries', 'getDpStatistics']);
+        // an adapter without the total of getRawEntries: every point is tried, the rest by ONE full statistics
+        expect(t.calls.filter(c => c === 'getDpStatistics')).to.have.length(1);
     });
 
     it('getRanges asks few data points directly - no scan of all files', async () => {

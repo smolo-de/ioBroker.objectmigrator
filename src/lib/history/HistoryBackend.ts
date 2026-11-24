@@ -125,20 +125,26 @@ export class HistoryAdapterBackend implements HistoryBackend {
         // few data points: ask for exactly these - getDpStatistics reads ALL files of the adapter, which
         // takes minutes on a large installation even for one value
         const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
+        let rest = ids;
         if (!cached && ids.length <= DIRECT_RANGES_MAX) {
-            try {
-                for (const [index, id] of ids.entries()) {
+            // per data point; only those that can not be asked directly (a series longer than the adapter
+            // reads at once) need the statistics below
+            rest = [];
+            for (const [index, id] of ids.entries()) {
+                try {
                     result[id] = await this.directRange(id);
                     onEach?.(id, result[id], index);
+                } catch (e) {
+                    rest.push(id);
+                    this.lastFallback = (e as Error).message;
                 }
+            }
+            if (!rest.length) {
                 return result;
-            } catch (e) {
-                // an older adapter or a truncated series: the statistics below - the reason goes to the log
-                this.lastFallback = (e as Error).message;
             }
         }
         const byId = await this.statistics(maxAgeMs);
-        for (const id of ids) {
+        for (const id of rest) {
             const stat = byId.get(id) ?? byId.get(historySafeId(id));
             result[id] =
                 stat && stat.count > 0 && stat.firstTs !== null && stat.lastTs !== null
