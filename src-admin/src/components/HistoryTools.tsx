@@ -185,6 +185,32 @@ export function HistoryTools(props: {
         void run(t('htRestore'), () =>
             props.socket.sendLong<Result[]>('history.restore', { dir: b.dir, files: b.files }),
         ).then(r => r && setDone(t('htRestored', { n: r.length })));
+    /** the backup as a file on this computer - independent of ioBroker */
+    const download = (b: Backup): void =>
+        void run(t('htDownload'), () => props.socket.send<unknown>('history.backupGet', { dir: b.dir })).then(data => {
+            if (!data) {
+                return;
+            }
+            const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `objectmigrator-${b.dir.split('/').pop()}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        });
+    const removeBackup = (b: Backup): void =>
+        void run(t('htBackupDelete'), () => props.socket.send('history.backupDelete', { dir: b.dir })).then(
+            r => r && setBackups(list => list?.filter(x => x.dir !== b.dir)),
+        );
+    /** a downloaded backup played back */
+    const upload = (file: File): void =>
+        void run(t('htUpload'), async () => {
+            const data = JSON.parse(await file.text()) as { format?: string; files?: Record<string, unknown> };
+            if (data.format !== 'objectmigrator-history-backup' || !data.files) {
+                throw new Error(t('htUploadInvalid'));
+            }
+            return props.socket.sendLong<Result[]>('history.restoreData', { files: data.files });
+        }).then(r => r && setDone(t('htRestored', { n: r.length })));
 
     const sum = (list: Result[], field: 'before' | 'after'): number => list.reduce((s, r) => s + r[field], 0);
     const periodText = `${from ? fmtDate(dateTs(from)!) : t('htFromFirst')} – ${to ? fmtDate(dateTs(to)!) : t('htToNow')}`;
@@ -508,8 +534,51 @@ export function HistoryTools(props: {
                                 >
                                     {t('htRestore')}
                                 </Button>
+                                <Button
+                                    size="small"
+                                    title={t('htDownloadHelp')}
+                                    disabled={!!busy}
+                                    onClick={() => download(b)}
+                                >
+                                    ⤓
+                                </Button>
+                                <Button
+                                    size="small"
+                                    color="error"
+                                    title={t('htBackupDelete')}
+                                    disabled={!!busy}
+                                    onClick={() => {
+                                        if (
+                                            window.confirm(t('htBackupDeleteConfirm', { dir: b.dir.split('/').pop()! }))
+                                        ) {
+                                            removeBackup(b);
+                                        }
+                                    }}
+                                >
+                                    🗑
+                                </Button>
                             </div>
                         ))}
+                        <Button
+                            size="small"
+                            component="label"
+                            title={t('htUploadHelp')}
+                            disabled={!!busy || props.disabled}
+                        >
+                            ⤒ {t('htUpload')}
+                            <input
+                                type="file"
+                                accept="application/json,.json"
+                                hidden
+                                onChange={e => {
+                                    const file = e.target.files?.[0];
+                                    e.target.value = '';
+                                    if (file && window.confirm(t('htUploadConfirm', { name: file.name }))) {
+                                        upload(file);
+                                    }
+                                }}
+                            />
+                        </Button>
                     </div>
                 </>
             )}

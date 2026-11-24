@@ -41,6 +41,26 @@ function idList(ids: unknown): string[] {
 /** Folder of the history backups in the files of the instance */
 const HISTORY_BACKUP_DIR = 'history-backups';
 
+/**
+ * A backup folder from the tab - only below the backup folder, no path parts
+ *
+ * @param dir - folder
+ */
+function backupDirOf(dir: unknown): string {
+    const d = typeof dir === 'string' ? dir : '';
+    if (!d.startsWith(`${HISTORY_BACKUP_DIR}/`) || d.includes('..') || d.split('/').length !== 2) {
+        throw new Error('Invalid backup folder');
+    }
+    return d;
+}
+
+/**
+ * A file name of a backup: no path parts
+ *
+ * @param name - file name
+ */
+const isBackupName = (name: string): boolean => /^[\w.-]+\.json$/.test(name) && !name.startsWith('.');
+
 /** Timestamp for folder names */
 const stamp = (): string => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 
@@ -152,6 +172,35 @@ class Objectmigrator extends utils.Adapter {
             preview,
             log: text => this.log.info(`${label}: ${text}`),
         });
+    }
+
+    /**
+     * Plays back backup files: custom.json gives the adapter settings back, the other files the values
+     *
+     * @param files - file name → content
+     */
+    private async restoreFiles(files: Record<string, unknown>): Promise<unknown> {
+        const custom = files['custom.json'] as Record<string, Record<string, unknown>> | undefined;
+        if (custom && typeof custom === 'object') {
+            // adapter settings switched off with this action come back
+            for (const [id, settings] of Object.entries(custom)) {
+                if (isValidId(id) && settings && typeof settings === 'object') {
+                    await this.extendForeignObjectAsync(id, { common: { custom: settings } });
+                }
+            }
+            this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
+        }
+        const values = Object.entries(files).filter(([name]) => name !== 'custom.json');
+        const memory: Record<string, unknown> = Object.fromEntries(values);
+        return restoreHistory(
+            this.backend!,
+            {
+                write: () => Promise.resolve(),
+                read: <T>(path: string) => Promise.resolve(memory[path] as T | undefined),
+            },
+            values.map(([name]) => name),
+            text => this.log.info(`Wiederherstellen: ${text}`),
+        );
     }
 
     /** Backup files in the files of the instance */
@@ -326,25 +375,39 @@ class Objectmigrator extends utils.Adapter {
             return list;
         },
         'history.restore': async (msg: { dir?: string; files?: string[] }) => {
-            const dir = String(msg?.dir ?? '');
-            if (!dir.startsWith(`${HISTORY_BACKUP_DIR}/`) || dir.includes('..')) {
-                throw new Error('Invalid backup folder');
+            const dir = backupDirOf(msg?.dir);
+            const files: Record<string, unknown> = {};
+            for (const name of (msg?.files ?? []).map(String).filter(isBackupName)) {
+                files[name] = await this.readJsonFile(`${dir}/${name}`);
             }
-            const names = (msg?.files ?? []).map(String).filter(n => /^[\w.-]+\.json$/.test(n) && n !== 'custom.json');
-            const custom = await this.readJsonFile<Record<string, Record<string, unknown>>>(`${dir}/custom.json`);
-            if (custom) {
-                // adapter settings switched off with this action come back
-                for (const [id, settings] of Object.entries(custom)) {
-                    await this.extendForeignObjectAsync(id, { common: { custom: settings } });
-                }
-                this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
+            return this.restoreFiles(files);
+        },
+        // a downloaded backup is played back (HM-22)
+        'history.restoreData': async (msg: { files?: Record<string, unknown> }) =>
+            this.restoreFiles(
+                Object.fromEntries(Object.entries(msg?.files ?? {}).filter(([name]) => isBackupName(name))),
+            ),
+        // download of a backup: all files of the folder in one object
+        'history.backupGet': async (msg: { dir?: string }) => {
+            const dir = backupDirOf(msg?.dir);
+            const files: Record<string, unknown> = {};
+            for (const f of (await this.readDirSafe(dir)).filter(e => !e.isDir && isBackupName(e.file))) {
+                files[f.file] = await this.readJsonFile(`${dir}/${f.file}`);
             }
-            return restoreHistory(
-                this.backend!,
-                this.backupStore(),
-                names.map(n => `${dir}/${n}`),
-                text => this.log.info(`Wiederherstellen: ${text}`),
-            );
+            return { format: 'objectmigrator-history-backup', dir, files };
+        },
+        'history.backupDelete': async (msg: { dir?: string }) => {
+            const dir = backupDirOf(msg?.dir);
+            for (const f of await this.readDirSafe(dir)) {
+                await this.delFileAsync(this.namespace, `${dir}/${f.file}`);
+            }
+            try {
+                await this.delFileAsync(this.namespace, dir);
+            } catch {
+                // the folder goes with its last file on some file stores
+            }
+            this.log.info(`Sicherung gelöscht: ${dir}`);
+            return { deleted: dir };
         },
         'custom.disable': async (msg: { ids?: string[]; instances?: string[]; backup?: boolean }) => {
             const ids = idList(msg?.ids);
@@ -389,7 +452,16 @@ class Objectmigrator extends utils.Adapter {
         // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
         'job.start': async (msg: { command?: string; message?: unknown }) => {
             const command = String(msg?.command ?? '');
-            if (!['plan.check', 'plan.write', 'history.delete', 'history.thin', 'history.restore'].includes(command)) {
+            if (
+                ![
+                    'plan.check',
+                    'plan.write',
+                    'history.delete',
+                    'history.thin',
+                    'history.restore',
+                    'history.restoreData',
+                ].includes(command)
+            ) {
                 throw new Error(`Command ${command} cannot run as a job`);
             }
             const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

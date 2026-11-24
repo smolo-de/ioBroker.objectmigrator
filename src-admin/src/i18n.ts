@@ -305,6 +305,16 @@ const de = {
     htNoBackups: 'Keine Sicherungen vorhanden',
     htRestore: 'Wiederherstellen',
     htRestored: '{n} Werte wiederhergestellt',
+    htDownload: 'Herunterladen',
+    htDownloadHelp: 'Sicherung als Datei auf diesen Computer laden – unabhängig von ioBroker aufbewahren',
+    htBackupDelete: 'Sicherung löschen',
+    htBackupDeleteConfirm:
+        'Sicherung {dir} wirklich löschen? Ohne heruntergeladene Datei lässt sie sich dann nicht mehr wiederherstellen.',
+    htUpload: 'Datei einspielen',
+    htUploadHelp: 'Eine heruntergeladene Sicherung wiederherstellen',
+    htUploadConfirm:
+        'Sicherung {name} einspielen? Die gesicherten Werte ersetzen im gesicherten Zeitraum die vorhandenen.',
+    htUploadInvalid: 'Die Datei ist keine Historien-Sicherung des objectmigrators',
     openCustoms: 'Original-Einstellungen',
     exportPlan: 'Export',
     exportPlanHelp:
@@ -741,6 +751,14 @@ const en: Texts = {
     htNoBackups: 'No backups',
     htRestore: 'Restore',
     htRestored: '{n} values restored',
+    htDownload: 'Download',
+    htDownloadHelp: 'Download the backup as a file to this computer – keep it independent of ioBroker',
+    htBackupDelete: 'Delete backup',
+    htBackupDeleteConfirm: 'Really delete backup {dir}? Without a downloaded file it cannot be restored any more.',
+    htUpload: 'Play back file',
+    htUploadHelp: 'Restore a downloaded backup',
+    htUploadConfirm: 'Play back backup {name}? In the saved period the saved values replace the existing ones.',
+    htUploadInvalid: 'The file is no history backup of the objectmigrator',
     openCustoms: 'Original settings',
     exportPlan: 'Export',
     exportPlanHelp:
