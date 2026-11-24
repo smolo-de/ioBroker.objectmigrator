@@ -168,8 +168,11 @@ describe('security', () => {
     it('history ranges are cached when allowed - getDpStatistics scans all files', async () => {
         let calls = 0;
         const transport: MessageTransport = {
-            sendTo: () => {
-                calls++;
+            sendTo: (_instance, command) => {
+                // the per-ID query of few values is tried first; counted is the full scan
+                if (command === 'getDpStatistics') {
+                    calls++;
+                }
                 return Promise.resolve({ result: [{ id: 'a.0.b', count: 1, firstTs: 1, lastTs: 1 }] });
             },
             getForeignState: () => Promise.resolve(null),

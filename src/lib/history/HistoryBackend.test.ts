@@ -42,7 +42,26 @@ describe('history/HistoryAdapterBackend', () => {
             'empty.0.x': undefined,
             missing: undefined,
         });
-        expect(t.calls).to.deep.equal(['getDpStatistics']);
+        // an adapter without the total of getRawEntries: the full statistics
+        expect(t.calls).to.deep.equal(['getRawEntries', 'getDpStatistics']);
+    });
+
+    it('getRanges asks few data points directly - no scan of all files', async () => {
+        const series = [
+            { ts: 10, val: 1 },
+            { ts: 20, val: 2 },
+            { ts: 30, val: 3 },
+        ];
+        const t = transport({
+            getRawEntries: (m: { id: string; sort: string }) =>
+                m.id === 'hm.0.temp'
+                    ? { total: 3, truncated: false, result: m.sort === 'asc' ? [series[0]] : [series[2]] }
+                    : { total: 0, truncated: false, result: [] },
+        });
+        const backend = new HistoryAdapterBackend('history.0', t);
+        const ranges = await backend.getRanges(['hm.0.temp', 'empty.0.x']);
+        expect(ranges).to.deep.equal({ 'hm.0.temp': { start: 10, end: 30, count: 3 }, 'empty.0.x': undefined });
+        expect(t.calls).to.not.include('getDpStatistics');
     });
 
     it('readRange pages through getRawEntries and filters the borders', async () => {

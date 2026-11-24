@@ -53,6 +53,9 @@ interface RawEntriesAnswer {
     result?: HistoryEntry[];
 }
 
+/** Up to this many data points, the ranges are asked per data point instead of by the full statistics */
+export const DIRECT_RANGES_MAX = 100;
+
 /** Maximal page size of `getRawEntries` in the history adapter */
 export const MAX_RAW_PAGE = 5000;
 
@@ -110,6 +113,19 @@ export class HistoryAdapterBackend implements HistoryBackend {
         if (!ids.length) {
             return result;
         }
+        // few data points: ask for exactly these - getDpStatistics reads ALL files of the adapter, which
+        // takes minutes on a large installation even for one value
+        const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
+        if (!cached && ids.length <= DIRECT_RANGES_MAX) {
+            try {
+                for (const id of ids) {
+                    result[id] = await this.directRange(id);
+                }
+                return result;
+            } catch {
+                // an older adapter or a truncated series: the statistics below
+            }
+        }
         const byId = await this.statistics(maxAgeMs);
         for (const id of ids) {
             const stat = byId.get(id) ?? byId.get(historySafeId(id));
@@ -119,6 +135,30 @@ export class HistoryAdapterBackend implements HistoryBackend {
                     : undefined;
         }
         return result;
+    }
+
+    /**
+     * First and last value and count of one data point via `getRawEntries` over all time - throws if the
+     * adapter does not send the total or truncated the series
+     *
+     * @param id - state ID
+     */
+    private async directRange(id: string): Promise<DataRange | undefined> {
+        const ask = (sort: 'asc' | 'desc'): Promise<RawEntriesAnswer & { total?: number; truncated?: boolean }> =>
+            this.send('getRawEntries', { id, start: 0, end: Date.now() + 60_000, sort, limit: 1, offset: 0 });
+        const first = await ask('asc');
+        if (typeof first.total !== 'number' || first.truncated) {
+            throw new Error('no exact total');
+        }
+        if (!first.total || !first.result?.length) {
+            return undefined;
+        }
+        const last = await ask('desc');
+        const lastTs = last.result?.[0]?.ts;
+        if (typeof lastTs !== 'number') {
+            throw new Error('no last value');
+        }
+        return { start: first.result[0].ts, end: lastTs, count: first.total };
     }
 
     /** Statistics of all data points, cached - getDpStatistics scans all files (slow on large installations) */
