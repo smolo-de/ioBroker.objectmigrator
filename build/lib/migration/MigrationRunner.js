@@ -41,6 +41,7 @@ const localDay = (ts) => {
 const RUN_DIR = "runs";
 const BACKUP_DIR = "backups";
 const CHECK_RANGES_MAX_AGE = 12e4;
+const SOURCE_RANGES_MAX_AGE = 30 * 6e4;
 function safeName(name) {
   return name.replace(/[^\w.\-äöüÄÖÜß ]/g, "_").trim() || "unnamed";
 }
@@ -356,7 +357,7 @@ class MigrationRunner {
    * @param options.fresh - do not use cached history ranges
    */
   async check(plan, options = {}) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J;
     const t0 = Date.now();
     let tPhase = t0;
     const phase = (name, detail = "") => {
@@ -486,17 +487,25 @@ class MigrationRunner {
     if (((_z = (_y = plan.tasks) == null ? void 0 : _y.length) != null ? _z : 0) > 0 && !result.historyAlive) {
       result.errors.push({ code: "historyNotRunning", args: { instance: this.backend.instance } });
     }
-    const rangeIds = ((_A = plan.tasks) != null ? _A : []).flatMap((t) => [t.target, ...t.sources.map((s) => s.id)]);
-    const ranges = result.historyAlive && ((_B = plan.tasks) == null ? void 0 : _B.length) ? await this.backend.getRanges(
-      rangeIds,
-      options.fresh ? 0 : CHECK_RANGES_MAX_AGE,
-      (id, range, index) => {
-        var _a2;
-        return this.adapter.log.info(
-          `Pr\xFCfen: Historie ${index + 1}/${rangeIds.length} ${id}: ${(_a2 = range == null ? void 0 : range.count) != null ? _a2 : 0} Eintr\xE4ge${range ? ` (${new Date(range.start).toISOString().slice(0, 10)} \u2013 ${new Date(range.end).toISOString().slice(0, 10)})` : ""}`
-        );
-      }
-    ) : {};
+    const targetIds = [...new Set(((_A = plan.tasks) != null ? _A : []).map((t) => t.target))];
+    const sourceIds = [...new Set(((_B = plan.tasks) != null ? _B : []).flatMap((t) => t.sources.map((s) => s.id)))].filter(
+      (id) => !targetIds.includes(id)
+    );
+    const rangeIds = [...targetIds, ...sourceIds];
+    const logRange = (id, range, index) => {
+      var _a2;
+      return this.adapter.log.info(
+        `Pr\xFCfen: Historie ${index + 1} ${id}: ${(_a2 = range == null ? void 0 : range.count) != null ? _a2 : 0} Eintr\xE4ge${range ? ` (${new Date(range.start).toISOString().slice(0, 10)} \u2013 ${new Date(range.end).toISOString().slice(0, 10)})` : ""}`
+      );
+    };
+    const ranges = result.historyAlive && ((_C = plan.tasks) == null ? void 0 : _C.length) ? {
+      ...await this.backend.getRanges(
+        sourceIds,
+        options.fresh ? SOURCE_RANGES_MAX_AGE : CHECK_RANGES_MAX_AGE,
+        logRange
+      ),
+      ...await this.backend.getRanges(targetIds, options.fresh ? 0 : CHECK_RANGES_MAX_AGE, logRange)
+    } : {};
     const fallback = this.backend.lastFallback;
     if (fallback) {
       this.adapter.log.warn(`Pr\xFCfen: gezielte Abfrage nicht m\xF6glich, Gesamtstatistik gelesen \u2013 ${fallback}`);
@@ -512,7 +521,7 @@ class MigrationRunner {
       );
     }
     const targets = /* @__PURE__ */ new Set();
-    for (const task of (_C = plan.tasks) != null ? _C : []) {
+    for (const task of (_D = plan.tasks) != null ? _D : []) {
       if (targets.has(task.target)) {
         result.errors.push({ code: "taskTargetTwice", id: task.target });
       }
@@ -538,11 +547,11 @@ class MigrationRunner {
             return `${s.id} (${(_b2 = (_a2 = ranges[s.id]) == null ? void 0 : _a2.count) != null ? _b2 : 0})`;
           }).join(
             ", "
-          )}: ca. ${estimate.total} Werte zu \xFCbertragen, am Ziel schon ${(_E = (_D = ranges[task.target]) == null ? void 0 : _D.count) != null ? _E : 0}`
+          )}: ca. ${estimate.total} Werte zu \xFCbertragen, am Ziel schon ${(_F = (_E = ranges[task.target]) == null ? void 0 : _E.count) != null ? _F : 0}`
         );
       }
       const settings = result.settings.find((m) => m.targetId === task.target);
-      const retention = Number((_G = (_F = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _F.retention) != null ? _G : 0);
+      const retention = Number((_H = (_G = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _G.retention) != null ? _H : 0);
       if (retention > 0) {
         entry.retention = retention;
         const oldest = Math.min(...entry.sources.map((s) => {
@@ -560,7 +569,7 @@ class MigrationRunner {
       result.history.push(entry);
     }
     result.ok = result.errors.length === 0;
-    phase("Historie", `${(_I = (_H = plan.tasks) == null ? void 0 : _H.length) != null ? _I : 0}`);
+    phase("Historie", `${(_J = (_I = plan.tasks) == null ? void 0 : _I.length) != null ? _J : 0}`);
     this.adapter.log.info(
       `Pr\xFCfen fertig in ${Date.now() - t0} ms: ${result.errors.length} Fehler, ${result.warnings.length} Warnungen`
     );

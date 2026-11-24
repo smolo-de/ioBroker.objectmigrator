@@ -78,19 +78,24 @@ class HistoryAdapterBackend {
       return result;
     }
     const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
+    let rest = ids;
     if (!cached && ids.length <= DIRECT_RANGES_MAX) {
-      try {
-        for (const [index, id] of ids.entries()) {
+      rest = [];
+      for (const [index, id] of ids.entries()) {
+        try {
           result[id] = await this.directRange(id);
           onEach == null ? void 0 : onEach(id, result[id], index);
+        } catch (e) {
+          rest.push(id);
+          this.lastFallback = e.message;
         }
+      }
+      if (!rest.length) {
         return result;
-      } catch (e) {
-        this.lastFallback = e.message;
       }
     }
     const byId = await this.statistics(maxAgeMs);
-    for (const id of ids) {
+    for (const id of rest) {
       const stat = (_a = byId.get(id)) != null ? _a : byId.get(historySafeId(id));
       result[id] = stat && stat.count > 0 && stat.firstTs !== null && stat.lastTs !== null ? { start: stat.firstTs, end: stat.lastTs, count: stat.count } : void 0;
     }
