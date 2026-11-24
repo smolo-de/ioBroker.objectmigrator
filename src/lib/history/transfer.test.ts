@@ -117,7 +117,7 @@ describe('history/transfer', () => {
 
     it('can be cancelled - starting again completes it without duplicates', async () => {
         const backend = new FakeBackend();
-        backend.data.src = series(96, day0, HOUR); // 4 days
+        backend.data.src = series(24 * 21, day0, HOUR); // 21 days = 3 windows of a week
         const task: TransferTask = { target: 'tgt', sources: [{ id: 'src' }], overlap: { type: 'all' } };
 
         let days = 0;
@@ -125,20 +125,20 @@ describe('history/transfer', () => {
             chunkSize: 5000,
             pauseMs: 0,
             sleep: noSleep,
-            isCancelled: () => days >= 2,
+            isCancelled: () => days >= 1,
             onProgress: () => {
                 days++;
             },
         });
         expect(first.cancelled).to.equal(true);
-        expect(backend.data.tgt.length).to.be.lessThan(96);
+        expect(backend.data.tgt.length).to.be.lessThan(24 * 21);
 
         // "Schreiben" clicked again
         const second = await runTransfer(backend, task, { chunkSize: 5000, pauseMs: 0, sleep: noSleep });
         expect(second.cancelled).to.equal(undefined);
         expect(second.stats.skippedExisting).to.equal(backend.data.tgt.length - second.stats.written);
-        expect(backend.data.tgt.length).to.equal(96);
-        expect(new Set(backend.data.tgt.map(x => x.ts)).size).to.equal(96);
+        expect(backend.data.tgt.length).to.equal(24 * 21);
+        expect(new Set(backend.data.tgt.map(x => x.ts)).size).to.equal(24 * 21);
     });
 
     it('keeps existing target values and only adds missing ones', async () => {

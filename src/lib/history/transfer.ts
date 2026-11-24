@@ -34,6 +34,22 @@ export function nextDay(dayStart: number): number {
     return d.getTime();
 }
 
+/** Days read with one request per data point - fewer requests, the history adapter reads its day files */
+export const WINDOW_DAYS = 7;
+
+/**
+ * Start of the window after the one starting at `dayStart`
+ *
+ * @param dayStart - start of a window (local midnight)
+ */
+export function nextWindow(dayStart: number): number {
+    let next = dayStart;
+    for (let i = 0; i < WINDOW_DAYS; i++) {
+        next = nextDay(next);
+    }
+    return next;
+}
+
 /** Progress of one task */
 export interface TransferProgress {
     /** Target ID */
@@ -157,7 +173,10 @@ export async function runTransfer(
         return true;
     };
 
-    for (let day = startOfDay(range.start); day <= range.end; day = nextDay(day)) {
+    // the target can only have values from its first value on - or written live by the alias during
+    // the run (from now on); before that, reading the target is skipped
+    const targetFrom = Math.min(before?.start ?? Infinity, Date.now() - DAY);
+    for (let day = startOfDay(range.start); day <= range.end; day = nextWindow(day)) {
         if (isCancelled()) {
             await flush(true);
             return { ...result, cancelled: true };
@@ -165,7 +184,7 @@ export async function runTransfer(
 
         const window: TimeRange = {
             start: Math.max(day, range.start),
-            end: Math.min(nextDay(day) - 1, range.end),
+            end: Math.min(nextWindow(day) - 1, range.end),
         };
 
         const entries: Record<string, HistoryEntry[]> = {};
@@ -180,7 +199,7 @@ export async function runTransfer(
         }
 
         if (any) {
-            const existing = await backend.readRange(task.target, window);
+            const existing = window.end < targetFrom ? [] : await backend.readRange(task.target, window);
             const { toWrite, stats } = mergeWindow({
                 entries,
                 sources: activeSources,
