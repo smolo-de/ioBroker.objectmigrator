@@ -37,6 +37,14 @@ function idList(ids) {
   return ids.filter(import_MigrationRunner.isValidId).slice(0, 2e3);
 }
 const HISTORY_BACKUP_DIR = "history-backups";
+function backupDirOf(dir) {
+  const d = typeof dir === "string" ? dir : "";
+  if (!d.startsWith(`${HISTORY_BACKUP_DIR}/`) || d.includes("..") || d.split("/").length !== 2) {
+    throw new Error("Invalid backup folder");
+  }
+  return d;
+}
+const isBackupName = (name) => /^[\w.-]+\.json$/.test(name) && !name.startsWith(".");
 const stamp = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "-");
 function periodOf(p) {
   const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
@@ -112,6 +120,33 @@ class Objectmigrator extends utils.Adapter {
       preview,
       log: (text) => this.log.info(`${label}: ${text}`)
     });
+  }
+  /**
+   * Plays back backup files: custom.json gives the adapter settings back, the other files the values
+   *
+   * @param files - file name → content
+   */
+  async restoreFiles(files) {
+    const custom = files["custom.json"];
+    if (custom && typeof custom === "object") {
+      for (const [id, settings] of Object.entries(custom)) {
+        if ((0, import_MigrationRunner.isValidId)(id) && settings && typeof settings === "object") {
+          await this.extendForeignObjectAsync(id, { common: { custom: settings } });
+        }
+      }
+      this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
+    }
+    const values = Object.entries(files).filter(([name]) => name !== "custom.json");
+    const memory = Object.fromEntries(values);
+    return (0, import_maintenance.restoreHistory)(
+      this.backend,
+      {
+        write: () => Promise.resolve(),
+        read: (path) => Promise.resolve(memory[path])
+      },
+      values.map(([name]) => name),
+      (text) => this.log.info(`Wiederherstellen: ${text}`)
+    );
   }
   /** Backup files in the files of the instance */
   backupStore() {
@@ -271,25 +306,41 @@ class Objectmigrator extends utils.Adapter {
       return list;
     },
     "history.restore": async (msg) => {
-      var _a, _b;
-      const dir = String((_a = msg == null ? void 0 : msg.dir) != null ? _a : "");
-      if (!dir.startsWith(`${HISTORY_BACKUP_DIR}/`) || dir.includes("..")) {
-        throw new Error("Invalid backup folder");
+      var _a;
+      const dir = backupDirOf(msg == null ? void 0 : msg.dir);
+      const files = {};
+      for (const name of ((_a = msg == null ? void 0 : msg.files) != null ? _a : []).map(String).filter(isBackupName)) {
+        files[name] = await this.readJsonFile(`${dir}/${name}`);
       }
-      const names = ((_b = msg == null ? void 0 : msg.files) != null ? _b : []).map(String).filter((n) => /^[\w.-]+\.json$/.test(n) && n !== "custom.json");
-      const custom = await this.readJsonFile(`${dir}/custom.json`);
-      if (custom) {
-        for (const [id, settings] of Object.entries(custom)) {
-          await this.extendForeignObjectAsync(id, { common: { custom: settings } });
-        }
-        this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
-      }
-      return (0, import_maintenance.restoreHistory)(
-        this.backend,
-        this.backupStore(),
-        names.map((n) => `${dir}/${n}`),
-        (text) => this.log.info(`Wiederherstellen: ${text}`)
+      return this.restoreFiles(files);
+    },
+    // a downloaded backup is played back (HM-22)
+    "history.restoreData": async (msg) => {
+      var _a;
+      return this.restoreFiles(
+        Object.fromEntries(Object.entries((_a = msg == null ? void 0 : msg.files) != null ? _a : {}).filter(([name]) => isBackupName(name)))
       );
+    },
+    // download of a backup: all files of the folder in one object
+    "history.backupGet": async (msg) => {
+      const dir = backupDirOf(msg == null ? void 0 : msg.dir);
+      const files = {};
+      for (const f of (await this.readDirSafe(dir)).filter((e) => !e.isDir && isBackupName(e.file))) {
+        files[f.file] = await this.readJsonFile(`${dir}/${f.file}`);
+      }
+      return { format: "objectmigrator-history-backup", dir, files };
+    },
+    "history.backupDelete": async (msg) => {
+      const dir = backupDirOf(msg == null ? void 0 : msg.dir);
+      for (const f of await this.readDirSafe(dir)) {
+        await this.delFileAsync(this.namespace, `${dir}/${f.file}`);
+      }
+      try {
+        await this.delFileAsync(this.namespace, dir);
+      } catch {
+      }
+      this.log.info(`Sicherung gel\xF6scht: ${dir}`);
+      return { deleted: dir };
     },
     "custom.disable": async (msg) => {
       var _a, _b, _c;
@@ -332,7 +383,14 @@ class Objectmigrator extends utils.Adapter {
     "job.start": async (msg) => {
       var _a;
       const command = String((_a = msg == null ? void 0 : msg.command) != null ? _a : "");
-      if (!["plan.check", "plan.write", "history.delete", "history.thin", "history.restore"].includes(command)) {
+      if (![
+        "plan.check",
+        "plan.write",
+        "history.delete",
+        "history.thin",
+        "history.restore",
+        "history.restoreData"
+      ].includes(command)) {
         throw new Error(`Command ${command} cannot run as a job`);
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
