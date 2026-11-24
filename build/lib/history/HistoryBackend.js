@@ -85,7 +85,8 @@ class HistoryAdapterBackend {
           onEach == null ? void 0 : onEach(id, result[id], index);
         }
         return result;
-      } catch {
+      } catch (e) {
+        this.lastFallback = e.message;
       }
     }
     const byId = await this.statistics(maxAgeMs);
@@ -106,7 +107,9 @@ class HistoryAdapterBackend {
     const ask = (sort) => this.send("getRawEntries", { id, start: 0, end: Date.now() + 6e4, sort, limit: 1, offset: 0 });
     const first = await ask("asc");
     if (typeof first.total !== "number" || first.truncated) {
-      throw new Error("no exact total");
+      throw new Error(
+        `${this.instance} getRawEntries for ${id} gives no exact total (total: ${String(first.total)}, truncated: ${String(first.truncated)}, fields: ${Object.keys(first).join(", ")})`
+      );
     }
     if (!first.total || !((_a = first.result) == null ? void 0 : _a.length)) {
       return void 0;
@@ -118,6 +121,8 @@ class HistoryAdapterBackend {
     }
     return { start: first.result[0].ts, end: lastTs, count: first.total };
   }
+  /** Why the last direct query fell back to the full statistics (for the log), cleared when read */
+  lastFallback;
   /** Statistics of all data points, cached - getDpStatistics scans all files (slow on large installations) */
   stats;
   statsPending;

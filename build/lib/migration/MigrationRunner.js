@@ -497,6 +497,11 @@ class MigrationRunner {
         );
       }
     ) : {};
+    const fallback = this.backend.lastFallback;
+    if (fallback) {
+      this.adapter.log.warn(`Pr\xFCfen: gezielte Abfrage nicht m\xF6glich, Gesamtstatistik gelesen \u2013 ${fallback}`);
+      this.backend.lastFallback = void 0;
+    }
     if (result.historyAlive && rangeIds.length) {
       const found = rangeIds.reduce((sum, id) => {
         var _a2, _b2;
