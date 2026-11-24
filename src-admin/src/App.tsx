@@ -770,6 +770,28 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
             }
         });
     }, [socket, ns]);
+    // while a run is active: read its progress every 5 s as well - the admin stops sending state changes
+    // for a while when there are more than 200 per second, the end of the run would then be missed
+    React.useEffect(() => {
+        if (run.status !== 'running') {
+            return;
+        }
+        const timer = setInterval(() => {
+            void socket
+                .getStates(`${ns}.run.*`)
+                .then(states => {
+                    const info: RunInfo = {};
+                    for (const [id, s] of Object.entries(states)) {
+                        if (!id.endsWith('.log')) {
+                            (info as Record<string, unknown>)[id.split('.').pop()!] = s?.val;
+                        }
+                    }
+                    setRun(r => ({ ...r, ...info }));
+                })
+                .catch(() => undefined);
+        }, 5000);
+        return () => clearInterval(timer);
+    }, [socket, ns, run.status]);
     // whole object tree: one pattern per loaded namespace
     const valuePatterns = [...new Set([...left.patterns, ...right.patterns])].join('|');
     React.useEffect(() => {
