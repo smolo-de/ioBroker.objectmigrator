@@ -18,6 +18,7 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var HistoryBackend_exports = {};
 __export(HistoryBackend_exports, {
+  DIRECT_RANGES_MAX: () => DIRECT_RANGES_MAX,
   HistoryAdapterBackend: () => HistoryAdapterBackend,
   MAX_RAW_PAGE: () => MAX_RAW_PAGE,
   historySafeId: () => historySafeId
@@ -26,6 +27,7 @@ module.exports = __toCommonJS(HistoryBackend_exports);
 function historySafeId(id) {
   return id.replace(/[\u0000|*,;"'<>?:/\\]/g, "~");
 }
+const DIRECT_RANGES_MAX = 100;
 const MAX_RAW_PAGE = 5e3;
 class HistoryAdapterBackend {
   /**
@@ -74,12 +76,45 @@ class HistoryAdapterBackend {
     if (!ids.length) {
       return result;
     }
+    const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
+    if (!cached && ids.length <= DIRECT_RANGES_MAX) {
+      try {
+        for (const id of ids) {
+          result[id] = await this.directRange(id);
+        }
+        return result;
+      } catch {
+      }
+    }
     const byId = await this.statistics(maxAgeMs);
     for (const id of ids) {
       const stat = (_a = byId.get(id)) != null ? _a : byId.get(historySafeId(id));
       result[id] = stat && stat.count > 0 && stat.firstTs !== null && stat.lastTs !== null ? { start: stat.firstTs, end: stat.lastTs, count: stat.count } : void 0;
     }
     return result;
+  }
+  /**
+   * First and last value and count of one data point via `getRawEntries` over all time - throws if the
+   * adapter does not send the total or truncated the series
+   *
+   * @param id - state ID
+   */
+  async directRange(id) {
+    var _a, _b, _c;
+    const ask = (sort) => this.send("getRawEntries", { id, start: 0, end: Date.now() + 6e4, sort, limit: 1, offset: 0 });
+    const first = await ask("asc");
+    if (typeof first.total !== "number" || first.truncated) {
+      throw new Error("no exact total");
+    }
+    if (!first.total || !((_a = first.result) == null ? void 0 : _a.length)) {
+      return void 0;
+    }
+    const last = await ask("desc");
+    const lastTs = (_c = (_b = last.result) == null ? void 0 : _b[0]) == null ? void 0 : _c.ts;
+    if (typeof lastTs !== "number") {
+      throw new Error("no last value");
+    }
+    return { start: first.result[0].ts, end: lastTs, count: first.total };
   }
   /** Statistics of all data points, cached - getDpStatistics scans all files (slow on large installations) */
   stats;
@@ -148,6 +183,7 @@ class HistoryAdapterBackend {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  DIRECT_RANGES_MAX,
   HistoryAdapterBackend,
   MAX_RAW_PAGE,
   historySafeId
