@@ -324,10 +324,15 @@ class Objectmigrator extends utils.Adapter {
     } else if (!this.backend || !this.runner) {
       response = { ok: false, error: { code: "NOT_READY", message: "Adapter is not ready yet" } };
     } else {
+      const started = Date.now();
       try {
         response = { ok: true, data: await handler(obj.message) };
+        if (Date.now() - started > 5e3) {
+          this.log.info(`${obj.command} beantwortet nach ${Date.now() - started} ms`);
+        }
       } catch (e) {
-        this.log.warn(`${obj.command} failed: ${e.message}`);
+        this.log.warn(`${obj.command} failed after ${Date.now() - started} ms: ${e.message}`);
+        this.log.debug(String(e.stack));
         response = { ok: false, error: { code: "FAILED", message: e.message } };
       }
     }

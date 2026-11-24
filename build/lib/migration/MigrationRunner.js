@@ -356,7 +356,19 @@ class MigrationRunner {
    * @param options.fresh - do not use cached history ranges
    */
   async check(plan, options = {}) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F;
+    const t0 = Date.now();
+    let tPhase = t0;
+    const phase = (name, detail = "") => {
+      const now = Date.now();
+      this.adapter.log.info(
+        `Pr\xFCfen: ${name}${detail ? ` (${detail})` : ""} \u2013 ${now - tPhase} ms, gesamt ${now - t0} ms`
+      );
+      tPhase = now;
+    };
+    this.adapter.log.info(
+      `Pr\xFCfen gestartet: ${(_b = (_a = plan.drafts) == null ? void 0 : _a.length) != null ? _b : 0} Objekte, ${(_d = (_c = plan.mappings) == null ? void 0 : _c.length) != null ? _d : 0} Einstellungen, ${(_f = (_e = plan.aliases) == null ? void 0 : _e.length) != null ? _f : 0} Aliase, ${(_h = (_g = plan.tasks) == null ? void 0 : _g.length) != null ? _h : 0} Historien${options.fresh ? ", frische Statistik" : ""}`
+    );
     const result = {
       ok: true,
       errors: [],
@@ -373,8 +385,9 @@ class MigrationRunner {
       result.ok = false;
       return result;
     }
+    phase("Status History-Adapter und Plan-Validierung");
     const draftIds = /* @__PURE__ */ new Set();
-    for (const draft of (_a = plan.drafts) != null ? _a : []) {
+    for (const draft of (_i = plan.drafts) != null ? _i : []) {
       if (draftIds.has(draft.id)) {
         result.errors.push({ code: "draftDuplicate", id: draft.id });
       }
@@ -390,9 +403,10 @@ class MigrationRunner {
         result.warnings.push({ code: "draftNoSource", id: draft.id });
       }
     }
+    phase("Objekte", `${(_k = (_j = plan.drafts) == null ? void 0 : _j.length) != null ? _k : 0}`);
     const instances = await this.instanceStatus();
     const enums = await this.adapter.getForeignObjectsAsync("enum.*", "enum");
-    for (const mapping of (_b = plan.mappings) != null ? _b : []) {
+    for (const mapping of (_l = plan.mappings) != null ? _l : []) {
       const source = mapping.sourceId ? await this.adapter.getForeignObjectAsync(mapping.sourceId) : { common: {} };
       if (!source) {
         result.errors.push({
@@ -402,7 +416,7 @@ class MigrationRunner {
         });
         continue;
       }
-      const target = (_d = await this.adapter.getForeignObjectAsync(mapping.targetId)) != null ? _d : (_c = plan.drafts) == null ? void 0 : _c.find((d) => d.id === mapping.targetId);
+      const target = (_n = await this.adapter.getForeignObjectAsync(mapping.targetId)) != null ? _n : (_m = plan.drafts) == null ? void 0 : _m.find((d) => d.id === mapping.targetId);
       if (!target) {
         result.errors.push({ code: "targetMissing", id: mapping.targetId });
         continue;
@@ -412,10 +426,11 @@ class MigrationRunner {
         ...mapping.options
       });
       result.warnings.push(...settingsPlan.warnings.map((w) => ({ ...w, id: mapping.targetId })));
-      const enumChanges = mapping.enums === false || !mapping.sourceId ? [] : (0, import_settings.planEnums)(enums, mapping.sourceId, mapping.targetId, ((_e = mapping.options) == null ? void 0 : _e.sourceMode) === "remove");
+      const enumChanges = mapping.enums === false || !mapping.sourceId ? [] : (0, import_settings.planEnums)(enums, mapping.sourceId, mapping.targetId, ((_o = mapping.options) == null ? void 0 : _o.sourceMode) === "remove");
       result.settings.push({ ...mapping, plan: settingsPlan, enumChanges });
     }
-    for (const update of (_f = plan.aliases) != null ? _f : []) {
+    phase("Einstellungen", `${(_q = (_p = plan.mappings) == null ? void 0 : _p.length) != null ? _q : 0}`);
+    for (const update of (_r = plan.aliases) != null ? _r : []) {
       if (!update.targetId.startsWith("alias.")) {
         result.errors.push({ code: "aliasNotAlias", id: update.targetId });
         continue;
@@ -433,11 +448,12 @@ class MigrationRunner {
         to: update.alias
       });
     }
-    if ((_g = plan.dbNames) == null ? void 0 : _g.length) {
+    phase("Aliase", `${(_t = (_s = plan.aliases) == null ? void 0 : _s.length) != null ? _t : 0}`);
+    if ((_u = plan.dbNames) == null ? void 0 : _u.length) {
       result.dbNames = [];
       for (const n of plan.dbNames) {
         const obj = await this.adapter.getForeignObjectAsync(n.id);
-        const custom = (_i = (_h = obj == null ? void 0 : obj.common) == null ? void 0 : _h.custom) == null ? void 0 : _i[n.instance];
+        const custom = (_w = (_v = obj == null ? void 0 : obj.common) == null ? void 0 : _v.custom) == null ? void 0 : _w[n.instance];
         if (!custom) {
           result.errors.push({ code: "dbNameNoSettings", id: n.id, args: { instance: n.instance } });
           continue;
@@ -461,15 +477,21 @@ class MigrationRunner {
         result.dbNames.push({ id: n.id, instance: n.instance, from, to, move, range });
       }
     }
-    if (((_k = (_j = plan.tasks) == null ? void 0 : _j.length) != null ? _k : 0) > 0 && !result.historyAlive) {
+    phase("DB-Namen");
+    if (((_x = plan.tasks) != null ? _x : []).length) {
+      this.adapter.log.info(
+        `Pr\xFCfen: lese die Statistik von ${this.backend.instance} (getDpStatistics) \u2013 kann bei gro\xDFer Historie dauern`
+      );
+    }
+    if (((_z = (_y = plan.tasks) == null ? void 0 : _y.length) != null ? _z : 0) > 0 && !result.historyAlive) {
       result.errors.push({ code: "historyNotRunning", args: { instance: this.backend.instance } });
     }
-    const ranges = result.historyAlive && ((_l = plan.tasks) == null ? void 0 : _l.length) ? await this.backend.getRanges(
+    const ranges = result.historyAlive && ((_A = plan.tasks) == null ? void 0 : _A.length) ? await this.backend.getRanges(
       plan.tasks.flatMap((t) => [t.target, ...t.sources.map((s) => s.id)]),
       options.fresh ? 0 : CHECK_RANGES_MAX_AGE
     ) : {};
     const targets = /* @__PURE__ */ new Set();
-    for (const task of (_m = plan.tasks) != null ? _m : []) {
+    for (const task of (_B = plan.tasks) != null ? _B : []) {
       if (targets.has(task.target)) {
         result.errors.push({ code: "taskTargetTwice", id: task.target });
       }
@@ -491,7 +513,7 @@ class MigrationRunner {
         entry.estimate = estimate.total;
       }
       const settings = result.settings.find((m) => m.targetId === task.target);
-      const retention = Number((_o = (_n = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _n.retention) != null ? _o : 0);
+      const retention = Number((_D = (_C = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _C.retention) != null ? _D : 0);
       if (retention > 0) {
         entry.retention = retention;
         const oldest = Math.min(...entry.sources.map((s) => {
@@ -509,6 +531,10 @@ class MigrationRunner {
       result.history.push(entry);
     }
     result.ok = result.errors.length === 0;
+    phase("Historie", `${(_F = (_E = plan.tasks) == null ? void 0 : _E.length) != null ? _F : 0}`);
+    this.adapter.log.info(
+      `Pr\xFCfen fertig in ${Date.now() - t0} ms: ${result.errors.length} Fehler, ${result.warnings.length} Warnungen`
+    );
     return result;
   }
   // ------------------------------------------------------------------ "Schreiben"
