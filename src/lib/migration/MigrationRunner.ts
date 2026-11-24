@@ -617,6 +617,11 @@ export class MigrationRunner {
                       ),
                   )
                 : {};
+        const fallback = (this.backend as { lastFallback?: string }).lastFallback;
+        if (fallback) {
+            this.adapter.log.warn(`Prüfen: gezielte Abfrage nicht möglich, Gesamtstatistik gelesen – ${fallback}`);
+            (this.backend as { lastFallback?: string }).lastFallback = undefined;
+        }
         if (result.historyAlive && rangeIds.length) {
             const found = rangeIds.reduce((sum, id) => sum + (ranges[id]?.count ?? 0), 0);
             this.adapter.log.info(

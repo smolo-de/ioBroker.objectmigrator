@@ -132,8 +132,9 @@ export class HistoryAdapterBackend implements HistoryBackend {
                     onEach?.(id, result[id], index);
                 }
                 return result;
-            } catch {
-                // an older adapter or a truncated series: the statistics below
+            } catch (e) {
+                // an older adapter or a truncated series: the statistics below - the reason goes to the log
+                this.lastFallback = (e as Error).message;
             }
         }
         const byId = await this.statistics(maxAgeMs);
@@ -158,7 +159,9 @@ export class HistoryAdapterBackend implements HistoryBackend {
             this.send('getRawEntries', { id, start: 0, end: Date.now() + 60_000, sort, limit: 1, offset: 0 });
         const first = await ask('asc');
         if (typeof first.total !== 'number' || first.truncated) {
-            throw new Error('no exact total');
+            throw new Error(
+                `${this.instance} getRawEntries for ${id} gives no exact total (total: ${String(first.total)}, truncated: ${String(first.truncated)}, fields: ${Object.keys(first).join(', ')})`,
+            );
         }
         if (!first.total || !first.result?.length) {
             return undefined;
@@ -170,6 +173,9 @@ export class HistoryAdapterBackend implements HistoryBackend {
         }
         return { start: first.result[0].ts, end: lastTs, count: first.total };
     }
+
+    /** Why the last direct query fell back to the full statistics (for the log), cleared when read */
+    public lastFallback?: string;
 
     /** Statistics of all data points, cached - getDpStatistics scans all files (slow on large installations) */
     private stats?: { at: number; byId: Map<string, NonNullable<StatisticsAnswer['result']>[number]> };
