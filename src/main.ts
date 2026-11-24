@@ -11,7 +11,15 @@ import { isAllowedSender } from './lib/access';
 import { isRunId, isValidId, MigrationRunner } from './lib/migration/MigrationRunner';
 import { findReferences, type RefSource } from './lib/refs/references';
 import type { MigrationPlan } from './lib/migration/types';
-import { instanceStatusMap, planSettings, type SettingsOptions } from './lib/settings/settings';
+import { HISTORY_ADAPTERS, instanceStatusMap, planSettings, type SettingsOptions } from './lib/settings/settings';
+import {
+    deleteHistory,
+    restoreHistory,
+    thinHistory,
+    type BackupStore,
+    type Period,
+    type ThinRule,
+} from './lib/history/maintenance';
 
 type Handler = (message: any) => Promise<unknown>;
 
@@ -28,6 +36,39 @@ function idList(ids: unknown): string[] {
         return [];
     }
     return ids.filter(isValidId).slice(0, 2000);
+}
+
+/** Folder of the history backups in the files of the instance */
+const HISTORY_BACKUP_DIR = 'history-backups';
+
+/** Timestamp for folder names */
+const stamp = (): string => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+
+/**
+ * A period from the tab: only numbers, open ends allowed
+ *
+ * @param p - period
+ */
+function periodOf(p: Period | undefined): Period {
+    const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    return { start: num(p?.start), end: num(p?.end) };
+}
+
+/**
+ * Thinning rules from the tab: only known fields with sensible numbers
+ *
+ * @param r - rules
+ */
+function thinRuleOf(r: ThinRule | undefined): ThinRule {
+    const pos = (v: unknown): number | undefined =>
+        typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    return {
+        round: pos(r?.round),
+        changesOnly: !!r?.changesOnly,
+        deadband: pos(r?.deadband),
+        intervalMs: pos(r?.intervalMs),
+        keep: r?.keep === 'first' || r?.keep === 'minmax' ? r.keep : 'avg',
+    };
 }
 
 /** A long command running in the background */
@@ -82,6 +123,72 @@ class Objectmigrator extends utils.Adapter {
     }
 
     /** Message API for the admin tab (07 §3) */
+    /**
+     * Runs a delete or thin action: the IDs checked, the backup folder named, everything logged
+     *
+     * @param kind - for the folder and the log
+     * @param msg - ids, backup, preview
+     * @param msg.ids - data points
+     * @param msg.backup - save the originals first (default on)
+     * @param msg.preview - only count
+     * @param run - the action
+     */
+    private async maintenance(
+        kind: 'delete' | 'thin',
+        msg: { ids?: string[]; backup?: boolean; preview?: boolean },
+        run: (
+            store: BackupStore,
+            ids: string[],
+            options: { backup: boolean; backupDir: string; preview: boolean; log: (t: string) => void },
+        ) => Promise<unknown>,
+    ): Promise<unknown> {
+        const ids = idList(msg?.ids);
+        const preview = !!msg?.preview;
+        const label = kind === 'delete' ? 'Löschen' : 'Ausdünnen';
+        this.log.info(`Historie ${label}${preview ? ' (Vorschau)' : ''}: ${ids.length} Datenpunkte`);
+        return run(this.backupStore(), ids, {
+            backup: msg?.backup !== false,
+            backupDir: `${HISTORY_BACKUP_DIR}/${stamp()}-${kind === 'delete' ? 'loeschen' : 'ausduennen'}`,
+            preview,
+            log: text => this.log.info(`${label}: ${text}`),
+        });
+    }
+
+    /** Backup files in the files of the instance */
+    private backupStore(): BackupStore {
+        return {
+            write: async (path, data) => this.writeFileAsync(this.namespace, path, JSON.stringify(data)),
+            read: <T>(path: string) => this.readJsonFile<T>(path),
+        };
+    }
+
+    /**
+     * Reads a JSON file of the instance, undefined if missing
+     *
+     * @param path - path in the files of the instance
+     */
+    private async readJsonFile<T>(path: string): Promise<T | undefined> {
+        try {
+            const res = await this.readFileAsync(this.namespace, path);
+            return JSON.parse(res.file.toString()) as T;
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
+     * Lists a folder of the instance files, empty if missing
+     *
+     * @param path - folder
+     */
+    private async readDirSafe(path: string): Promise<{ file: string; isDir: boolean }[]> {
+        try {
+            return (await this.readDirAsync(this.namespace, path)).map(e => ({ file: e.file, isDir: e.isDir }));
+        } catch {
+            return [];
+        }
+    }
+
     /** running long commands (job.start / job.result) */
     private readonly jobs = new Map<string, Job>();
 
@@ -183,12 +290,106 @@ class Objectmigrator extends utils.Adapter {
         // ---- "Prüfen" / "Schreiben" (06 §5)
         'plan.check': (msg: MigrationPlan) => this.runner!.check(msg),
 
+        // ---- history maintenance (HM-20..23): count, delete a period, thin, restore, adapters off
+        'history.count': async (msg: { ids?: string[] }) => {
+            const ids = idList(msg?.ids);
+            this.log.info(`Historie zählen: ${ids.length} Datenpunkte`);
+            return this.backend!.getRanges(ids, 0, (id, range, index) =>
+                this.log.info(`Historie zählen ${index + 1}/${ids.length} ${id}: ${range?.count ?? 0} Einträge`),
+            );
+        },
+        'history.delete': async (msg: { ids?: string[]; period?: Period; backup?: boolean; preview?: boolean }) =>
+            this.maintenance('delete', msg, (store, ids, options) =>
+                deleteHistory(this.backend!, store, ids, periodOf(msg.period), options),
+            ),
+        'history.thin': async (msg: {
+            ids?: string[];
+            period?: Period;
+            rule?: ThinRule;
+            backup?: boolean;
+            preview?: boolean;
+        }) =>
+            this.maintenance('thin', msg, (store, ids, options) =>
+                thinHistory(this.backend!, store, ids, periodOf(msg.period), thinRuleOf(msg.rule), options),
+            ),
+        'history.backups': async () => {
+            const dirs = await this.readDirSafe(HISTORY_BACKUP_DIR);
+            const list = [];
+            for (const dir of dirs
+                .filter(d => d.isDir)
+                .map(d => d.file)
+                .sort()
+                .reverse()) {
+                const filesIn = (await this.readDirSafe(`${HISTORY_BACKUP_DIR}/${dir}`)).filter(f => !f.isDir);
+                list.push({ dir: `${HISTORY_BACKUP_DIR}/${dir}`, files: filesIn.map(f => f.file) });
+            }
+            return list;
+        },
+        'history.restore': async (msg: { dir?: string; files?: string[] }) => {
+            const dir = String(msg?.dir ?? '');
+            if (!dir.startsWith(`${HISTORY_BACKUP_DIR}/`) || dir.includes('..')) {
+                throw new Error('Invalid backup folder');
+            }
+            const names = (msg?.files ?? []).map(String).filter(n => /^[\w.-]+\.json$/.test(n) && n !== 'custom.json');
+            const custom = await this.readJsonFile<Record<string, Record<string, unknown>>>(`${dir}/custom.json`);
+            if (custom) {
+                // adapter settings switched off with this action come back
+                for (const [id, settings] of Object.entries(custom)) {
+                    await this.extendForeignObjectAsync(id, { common: { custom: settings } });
+                }
+                this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
+            }
+            return restoreHistory(
+                this.backend!,
+                this.backupStore(),
+                names.map(n => `${dir}/${n}`),
+                text => this.log.info(`Wiederherstellen: ${text}`),
+            );
+        },
+        'custom.disable': async (msg: { ids?: string[]; instances?: string[]; backup?: boolean }) => {
+            const ids = idList(msg?.ids);
+            const instances = (msg?.instances ?? []).map(String).filter(k => /^[\w-]+\.\d+$/.test(k));
+            const dir = `${HISTORY_BACKUP_DIR}/${stamp()}-adapter-aus`;
+            const before: Record<string, Record<string, unknown>> = {};
+            let changed = 0;
+            for (const id of ids) {
+                const obj = await this.getForeignObjectAsync(id);
+                const custom = (obj?.common as { custom?: Record<string, Record<string, unknown> | null> } | undefined)
+                    ?.custom;
+                if (!obj || !custom) {
+                    continue;
+                }
+                const patch: Record<string, Record<string, unknown> | null> = {};
+                for (const key of instances) {
+                    const settings = custom[key];
+                    if (!settings || settings.enabled === false) {
+                        continue;
+                    }
+                    (before[id] ??= {})[key] = settings;
+                    // history adapters evaluate "enabled"; the others (lovelace, ...) treat every entry as
+                    // active - the admin removes it when switched off, so does this
+                    patch[key] = HISTORY_ADAPTERS.includes(key.split('.')[0]) ? { ...settings, enabled: false } : null;
+                }
+                if (Object.keys(patch).length) {
+                    await this.extendForeignObjectAsync(id, { common: { custom: patch } });
+                    changed++;
+                }
+            }
+            if (msg?.backup !== false && changed) {
+                await this.writeFileAsync(this.namespace, `${dir}/custom.json`, JSON.stringify(before));
+            }
+            this.log.info(
+                `Adapter deaktiviert (${instances.join(', ')}): ${changed} Objekte${changed && msg?.backup !== false ? `, gesichert in ${dir}` : ''}`,
+            );
+            return { changed, backup: msg?.backup !== false && changed ? dir : undefined };
+        },
+
         // ---- long commands as a job: the admin answers sendTo with "timeout" after a while, so the tab
         // starts the command and asks for the result until it is there
         // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
         'job.start': async (msg: { command?: string; message?: unknown }) => {
             const command = String(msg?.command ?? '');
-            if (!['plan.check', 'plan.write'].includes(command)) {
+            if (!['plan.check', 'plan.write', 'history.delete', 'history.thin', 'history.restore'].includes(command)) {
                 throw new Error(`Command ${command} cannot run as a job`);
             }
             const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

@@ -28,6 +28,7 @@ import { LinkLegend } from './components/LinkLegend';
 import { ObjectTree, ROW_HEIGHT, type DragPayload, type InstanceInfo } from './components/ObjectTree';
 import { ObjectPicker } from './components/ObjectPicker';
 import { PropertiesPanel } from './components/PropertiesPanel';
+import { HistoryTools } from './components/HistoryTools';
 import { DbNameDialog, DbNamesView } from './components/DbNamesView';
 import { RefsView } from './components/RefsView';
 import { RunsView } from './components/RunsView';
@@ -1518,6 +1519,37 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     const selectedNode = selected
         ? (selected.side === 'source' ? left.nodes : right.nodes).get(selected.id)
         : undefined;
+    /** values of the selection for "Historie & Adapter" (HM-20..23): states, those below nodes included */
+    const toolIds = ((): string[] => {
+        if (!selected) {
+            return [];
+        }
+        const tree = selected.side === 'source' ? left : right;
+        const multi = selected.side === 'source' ? sourceSelection : targetSelection;
+        const roots = multi.size > 1 ? [...multi] : [selected.id];
+        const out = new Set<string>();
+        const walk = (id: string): void => {
+            const node = tree.nodes.get(id);
+            if (!node || node.draft) {
+                return;
+            }
+            if (node.type === 'state') {
+                out.add(id);
+            }
+            node.children.forEach(c => walk(c.id));
+        };
+        roots.forEach(walk);
+        return [...out];
+    })();
+    const toolCustomKeys = [
+        ...new Set(
+            toolIds.flatMap(id =>
+                Object.entries((objectOf(id)?.common?.custom ?? {}) as Record<string, unknown>)
+                    .filter(([, v]) => v && typeof v === 'object')
+                    .map(([k]) => k),
+            ),
+        ),
+    ].sort();
     const running = run.status === 'running';
     // keyboard alternative to drag & drop (ME-18): select a source state, then a target state
     const canLink =
@@ -2054,6 +2086,12 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     <p>{t('help')}</p>
                                 </div>
                             )}
+                            <HistoryTools
+                                socket={socket}
+                                ids={toolIds}
+                                customKeys={toolCustomKeys}
+                                disabled={running}
+                            />
                         </div>
                     </div>
 
