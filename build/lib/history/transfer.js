@@ -18,7 +18,9 @@ var __copyProps = (to, from, except, desc) => {
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var transfer_exports = {};
 __export(transfer_exports, {
+  WINDOW_DAYS: () => WINDOW_DAYS,
   nextDay: () => nextDay,
+  nextWindow: () => nextWindow,
   runTransfer: () => runTransfer,
   startOfDay: () => startOfDay,
   taskRange: () => taskRange
@@ -37,6 +39,14 @@ function nextDay(dayStart) {
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
+const WINDOW_DAYS = 7;
+function nextWindow(dayStart) {
+  let next = dayStart;
+  for (let i = 0; i < WINDOW_DAYS; i++) {
+    next = nextDay(next);
+  }
+  return next;
+}
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function taskRange(ranges, limit) {
   var _a, _b;
@@ -49,7 +59,7 @@ function taskRange(ranges, limit) {
   return start <= end ? { start, end } : void 0;
 }
 async function runTransfer(backend, task, options) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e;
   const sleep = (_a = options.sleep) != null ? _a : defaultSleep;
   const chunkSize = Math.max(1, Math.min(options.chunkSize || 5e3, 5e3));
   const isCancelled = (_b = options.isCancelled) != null ? _b : (() => false);
@@ -90,14 +100,15 @@ async function runTransfer(backend, task, options) {
     }
     return true;
   };
-  for (let day = startOfDay(range.start); day <= range.end; day = nextDay(day)) {
+  const targetFrom = Math.min((_d = before == null ? void 0 : before.start) != null ? _d : Infinity, Date.now() - DAY);
+  for (let day = startOfDay(range.start); day <= range.end; day = nextWindow(day)) {
     if (isCancelled()) {
       await flush(true);
       return { ...result, cancelled: true };
     }
     const window = {
       start: Math.max(day, range.start),
-      end: Math.min(nextDay(day) - 1, range.end)
+      end: Math.min(nextWindow(day) - 1, range.end)
     };
     const entries = {};
     let any = false;
@@ -110,7 +121,7 @@ async function runTransfer(backend, task, options) {
       any || (any = entries[source.id].length > 0);
     }
     if (any) {
-      const existing = await backend.readRange(task.target, window);
+      const existing = window.end < targetFrom ? [] : await backend.readRange(task.target, window);
       const { toWrite, stats } = (0, import_merge.mergeWindow)({
         entries,
         sources: activeSources,
@@ -126,7 +137,7 @@ async function runTransfer(backend, task, options) {
         return { ...result, cancelled: true };
       }
     }
-    (_d = options.onProgress) == null ? void 0 : _d.call(options, {
+    (_e = options.onProgress) == null ? void 0 : _e.call(options, {
       target: task.target,
       day,
       fraction: Math.min(1, (window.end - range.start) / total),
@@ -138,7 +149,9 @@ async function runTransfer(backend, task, options) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  WINDOW_DAYS,
   nextDay,
+  nextWindow,
   runTransfer,
   startOfDay,
   taskRange
