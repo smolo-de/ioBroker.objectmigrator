@@ -28,12 +28,29 @@ var import_access = require("./lib/access");
 var import_MigrationRunner = require("./lib/migration/MigrationRunner");
 var import_references = require("./lib/refs/references");
 var import_settings = require("./lib/settings/settings");
+var import_maintenance = require("./lib/history/maintenance");
 const PREVIEW_RANGES_MAX_AGE = 3e5;
 function idList(ids) {
   if (!Array.isArray(ids)) {
     return [];
   }
   return ids.filter(import_MigrationRunner.isValidId).slice(0, 2e3);
+}
+const HISTORY_BACKUP_DIR = "history-backups";
+const stamp = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "-");
+function periodOf(p) {
+  const num = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
+  return { start: num(p == null ? void 0 : p.start), end: num(p == null ? void 0 : p.end) };
+}
+function thinRuleOf(r) {
+  const pos = (v) => typeof v === "number" && Number.isFinite(v) && v > 0 ? v : void 0;
+  return {
+    round: pos(r == null ? void 0 : r.round),
+    changesOnly: !!(r == null ? void 0 : r.changesOnly),
+    deadband: pos(r == null ? void 0 : r.deadband),
+    intervalMs: pos(r == null ? void 0 : r.intervalMs),
+    keep: (r == null ? void 0 : r.keep) === "first" || (r == null ? void 0 : r.keep) === "minmax" ? r.keep : "avg"
+  };
 }
 class Objectmigrator extends utils.Adapter {
   backend;
@@ -74,6 +91,60 @@ class Objectmigrator extends utils.Adapter {
     callback();
   }
   /** Message API for the admin tab (07 §3) */
+  /**
+   * Runs a delete or thin action: the IDs checked, the backup folder named, everything logged
+   *
+   * @param kind - for the folder and the log
+   * @param msg - ids, backup, preview
+   * @param msg.ids - data points
+   * @param msg.backup - save the originals first (default on)
+   * @param msg.preview - only count
+   * @param run - the action
+   */
+  async maintenance(kind, msg, run) {
+    const ids = idList(msg == null ? void 0 : msg.ids);
+    const preview = !!(msg == null ? void 0 : msg.preview);
+    const label = kind === "delete" ? "L\xF6schen" : "Ausd\xFCnnen";
+    this.log.info(`Historie ${label}${preview ? " (Vorschau)" : ""}: ${ids.length} Datenpunkte`);
+    return run(this.backupStore(), ids, {
+      backup: (msg == null ? void 0 : msg.backup) !== false,
+      backupDir: `${HISTORY_BACKUP_DIR}/${stamp()}-${kind === "delete" ? "loeschen" : "ausduennen"}`,
+      preview,
+      log: (text) => this.log.info(`${label}: ${text}`)
+    });
+  }
+  /** Backup files in the files of the instance */
+  backupStore() {
+    return {
+      write: async (path, data) => this.writeFileAsync(this.namespace, path, JSON.stringify(data)),
+      read: (path) => this.readJsonFile(path)
+    };
+  }
+  /**
+   * Reads a JSON file of the instance, undefined if missing
+   *
+   * @param path - path in the files of the instance
+   */
+  async readJsonFile(path) {
+    try {
+      const res = await this.readFileAsync(this.namespace, path);
+      return JSON.parse(res.file.toString());
+    } catch {
+      return void 0;
+    }
+  }
+  /**
+   * Lists a folder of the instance files, empty if missing
+   *
+   * @param path - folder
+   */
+  async readDirSafe(path) {
+    try {
+      return (await this.readDirAsync(this.namespace, path)).map((e) => ({ file: e.file, isDir: e.isDir }));
+    } catch {
+      return [];
+    }
+  }
   /** running long commands (job.start / job.result) */
   jobs = /* @__PURE__ */ new Map();
   handlers = {
@@ -167,13 +238,101 @@ class Objectmigrator extends utils.Adapter {
     },
     // ---- "Prüfen" / "Schreiben" (06 §5)
     "plan.check": (msg) => this.runner.check(msg),
+    // ---- history maintenance (HM-20..23): count, delete a period, thin, restore, adapters off
+    "history.count": async (msg) => {
+      const ids = idList(msg == null ? void 0 : msg.ids);
+      this.log.info(`Historie z\xE4hlen: ${ids.length} Datenpunkte`);
+      return this.backend.getRanges(
+        ids,
+        0,
+        (id, range, index) => {
+          var _a;
+          return this.log.info(`Historie z\xE4hlen ${index + 1}/${ids.length} ${id}: ${(_a = range == null ? void 0 : range.count) != null ? _a : 0} Eintr\xE4ge`);
+        }
+      );
+    },
+    "history.delete": async (msg) => this.maintenance(
+      "delete",
+      msg,
+      (store, ids, options) => (0, import_maintenance.deleteHistory)(this.backend, store, ids, periodOf(msg.period), options)
+    ),
+    "history.thin": async (msg) => this.maintenance(
+      "thin",
+      msg,
+      (store, ids, options) => (0, import_maintenance.thinHistory)(this.backend, store, ids, periodOf(msg.period), thinRuleOf(msg.rule), options)
+    ),
+    "history.backups": async () => {
+      const dirs = await this.readDirSafe(HISTORY_BACKUP_DIR);
+      const list = [];
+      for (const dir of dirs.filter((d) => d.isDir).map((d) => d.file).sort().reverse()) {
+        const filesIn = (await this.readDirSafe(`${HISTORY_BACKUP_DIR}/${dir}`)).filter((f) => !f.isDir);
+        list.push({ dir: `${HISTORY_BACKUP_DIR}/${dir}`, files: filesIn.map((f) => f.file) });
+      }
+      return list;
+    },
+    "history.restore": async (msg) => {
+      var _a, _b;
+      const dir = String((_a = msg == null ? void 0 : msg.dir) != null ? _a : "");
+      if (!dir.startsWith(`${HISTORY_BACKUP_DIR}/`) || dir.includes("..")) {
+        throw new Error("Invalid backup folder");
+      }
+      const names = ((_b = msg == null ? void 0 : msg.files) != null ? _b : []).map(String).filter((n) => /^[\w.-]+\.json$/.test(n) && n !== "custom.json");
+      const custom = await this.readJsonFile(`${dir}/custom.json`);
+      if (custom) {
+        for (const [id, settings] of Object.entries(custom)) {
+          await this.extendForeignObjectAsync(id, { common: { custom: settings } });
+        }
+        this.log.info(`Adapter-Einstellungen wiederhergestellt: ${Object.keys(custom).length} Objekte`);
+      }
+      return (0, import_maintenance.restoreHistory)(
+        this.backend,
+        this.backupStore(),
+        names.map((n) => `${dir}/${n}`),
+        (text) => this.log.info(`Wiederherstellen: ${text}`)
+      );
+    },
+    "custom.disable": async (msg) => {
+      var _a, _b, _c;
+      const ids = idList(msg == null ? void 0 : msg.ids);
+      const instances = ((_a = msg == null ? void 0 : msg.instances) != null ? _a : []).map(String).filter((k) => /^[\w-]+\.\d+$/.test(k));
+      const dir = `${HISTORY_BACKUP_DIR}/${stamp()}-adapter-aus`;
+      const before = {};
+      let changed = 0;
+      for (const id of ids) {
+        const obj = await this.getForeignObjectAsync(id);
+        const custom = (_b = obj == null ? void 0 : obj.common) == null ? void 0 : _b.custom;
+        if (!obj || !custom) {
+          continue;
+        }
+        const patch = {};
+        for (const key of instances) {
+          const settings = custom[key];
+          if (!settings || settings.enabled === false) {
+            continue;
+          }
+          ((_c = before[id]) != null ? _c : before[id] = {})[key] = settings;
+          patch[key] = import_settings.HISTORY_ADAPTERS.includes(key.split(".")[0]) ? { ...settings, enabled: false } : null;
+        }
+        if (Object.keys(patch).length) {
+          await this.extendForeignObjectAsync(id, { common: { custom: patch } });
+          changed++;
+        }
+      }
+      if ((msg == null ? void 0 : msg.backup) !== false && changed) {
+        await this.writeFileAsync(this.namespace, `${dir}/custom.json`, JSON.stringify(before));
+      }
+      this.log.info(
+        `Adapter deaktiviert (${instances.join(", ")}): ${changed} Objekte${changed && (msg == null ? void 0 : msg.backup) !== false ? `, gesichert in ${dir}` : ""}`
+      );
+      return { changed, backup: (msg == null ? void 0 : msg.backup) !== false && changed ? dir : void 0 };
+    },
     // ---- long commands as a job: the admin answers sendTo with "timeout" after a while, so the tab
     // starts the command and asks for the result until it is there
     // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
     "job.start": async (msg) => {
       var _a;
       const command = String((_a = msg == null ? void 0 : msg.command) != null ? _a : "");
-      if (!["plan.check", "plan.write"].includes(command)) {
+      if (!["plan.check", "plan.write", "history.delete", "history.thin", "history.restore"].includes(command)) {
         throw new Error(`Command ${command} cannot run as a job`);
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
