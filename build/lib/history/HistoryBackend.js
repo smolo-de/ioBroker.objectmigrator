@@ -69,8 +69,9 @@ class HistoryAdapterBackend {
    *
    * @param ids - state IDs
    * @param maxAgeMs - a cached result may be this old, 0 = always fresh
+   * @param onEach - called for every data point asked directly (log while it takes long)
    */
-  async getRanges(ids, maxAgeMs = 0) {
+  async getRanges(ids, maxAgeMs = 0, onEach) {
     var _a;
     const result = {};
     if (!ids.length) {
@@ -79,8 +80,9 @@ class HistoryAdapterBackend {
     const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
     if (!cached && ids.length <= DIRECT_RANGES_MAX) {
       try {
-        for (const id of ids) {
+        for (const [index, id] of ids.entries()) {
           result[id] = await this.directRange(id);
+          onEach == null ? void 0 : onEach(id, result[id], index);
         }
         return result;
       } catch {

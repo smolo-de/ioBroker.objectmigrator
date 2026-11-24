@@ -356,7 +356,7 @@ class MigrationRunner {
    * @param options.fresh - do not use cached history ranges
    */
   async check(plan, options = {}) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I;
     const t0 = Date.now();
     let tPhase = t0;
     const phase = (name, detail = "") => {
@@ -486,12 +486,28 @@ class MigrationRunner {
     if (((_z = (_y = plan.tasks) == null ? void 0 : _y.length) != null ? _z : 0) > 0 && !result.historyAlive) {
       result.errors.push({ code: "historyNotRunning", args: { instance: this.backend.instance } });
     }
-    const ranges = result.historyAlive && ((_A = plan.tasks) == null ? void 0 : _A.length) ? await this.backend.getRanges(
-      plan.tasks.flatMap((t) => [t.target, ...t.sources.map((s) => s.id)]),
-      options.fresh ? 0 : CHECK_RANGES_MAX_AGE
+    const rangeIds = ((_A = plan.tasks) != null ? _A : []).flatMap((t) => [t.target, ...t.sources.map((s) => s.id)]);
+    const ranges = result.historyAlive && ((_B = plan.tasks) == null ? void 0 : _B.length) ? await this.backend.getRanges(
+      rangeIds,
+      options.fresh ? 0 : CHECK_RANGES_MAX_AGE,
+      (id, range, index) => {
+        var _a2;
+        return this.adapter.log.info(
+          `Pr\xFCfen: Historie ${index + 1}/${rangeIds.length} ${id}: ${(_a2 = range == null ? void 0 : range.count) != null ? _a2 : 0} Eintr\xE4ge${range ? ` (${new Date(range.start).toISOString().slice(0, 10)} \u2013 ${new Date(range.end).toISOString().slice(0, 10)})` : ""}`
+        );
+      }
     ) : {};
+    if (result.historyAlive && rangeIds.length) {
+      const found = rangeIds.reduce((sum, id) => {
+        var _a2, _b2;
+        return sum + ((_b2 = (_a2 = ranges[id]) == null ? void 0 : _a2.count) != null ? _b2 : 0);
+      }, 0);
+      this.adapter.log.info(
+        `Pr\xFCfen: Historie gelesen \u2013 ${rangeIds.length} Datenpunkte, ${found} Eintr\xE4ge gefunden`
+      );
+    }
     const targets = /* @__PURE__ */ new Set();
-    for (const task of (_B = plan.tasks) != null ? _B : []) {
+    for (const task of (_C = plan.tasks) != null ? _C : []) {
       if (targets.has(task.target)) {
         result.errors.push({ code: "taskTargetTwice", id: task.target });
       }
@@ -511,9 +527,17 @@ class MigrationRunner {
           entry.sources.push({ id: s.id, range: ranges[s.id], estimate: estimate.perSource[s.id] });
         }
         entry.estimate = estimate.total;
+        this.adapter.log.info(
+          `Pr\xFCfen: ${task.target} \u2190 ${task.sources.map((s) => {
+            var _a2, _b2;
+            return `${s.id} (${(_b2 = (_a2 = ranges[s.id]) == null ? void 0 : _a2.count) != null ? _b2 : 0})`;
+          }).join(
+            ", "
+          )}: ca. ${estimate.total} Werte zu \xFCbertragen, am Ziel schon ${(_E = (_D = ranges[task.target]) == null ? void 0 : _D.count) != null ? _E : 0}`
+        );
       }
       const settings = result.settings.find((m) => m.targetId === task.target);
-      const retention = Number((_D = (_C = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _C.retention) != null ? _D : 0);
+      const retention = Number((_G = (_F = settings == null ? void 0 : settings.plan.targetCustom[this.backend.instance]) == null ? void 0 : _F.retention) != null ? _G : 0);
       if (retention > 0) {
         entry.retention = retention;
         const oldest = Math.min(...entry.sources.map((s) => {
@@ -531,7 +555,7 @@ class MigrationRunner {
       result.history.push(entry);
     }
     result.ok = result.errors.length === 0;
-    phase("Historie", `${(_F = (_E = plan.tasks) == null ? void 0 : _E.length) != null ? _F : 0}`);
+    phase("Historie", `${(_I = (_H = plan.tasks) == null ? void 0 : _H.length) != null ? _I : 0}`);
     this.adapter.log.info(
       `Pr\xFCfen fertig in ${Date.now() - t0} ms: ${result.errors.length} Fehler, ${result.warnings.length} Warnungen`
     );
