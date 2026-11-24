@@ -75,6 +75,27 @@ export class Connection {
     }
 
     /**
+     * Sends a long command (check, write) as a job and asks for its result every 2 s - the admin
+     * itself answers a long sendTo with "timeout"
+     *
+     * @param command - command of main.ts
+     * @param message - payload
+     */
+    public async sendLong<T>(command: string, message: unknown = {}): Promise<T> {
+        const { id } = await this.send<{ id: string }>('job.start', { command, message });
+        for (;;) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const res = await this.send<{ done: boolean; data?: T; error?: string }>('job.result', { id });
+            if (res.done) {
+                if (res.error) {
+                    throw new AdapterError(res.error);
+                }
+                return res.data as T;
+            }
+        }
+    }
+
+    /**
      * Sends a command to the adapter and unpacks the answer
      *
      * @param command - command of main.ts

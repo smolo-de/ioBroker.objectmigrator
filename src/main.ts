@@ -30,6 +30,14 @@ function idList(ids: unknown): string[] {
     return ids.filter(isValidId).slice(0, 2000);
 }
 
+/** A long command running in the background */
+interface Job {
+    done: boolean;
+    at: number;
+    data?: unknown;
+    error?: string;
+}
+
 class Objectmigrator extends utils.Adapter {
     private backend?: HistoryBackend;
     private runner?: MigrationRunner;
@@ -74,6 +82,9 @@ class Objectmigrator extends utils.Adapter {
     }
 
     /** Message API for the admin tab (07 §3) */
+    /** running long commands (job.start / job.result) */
+    private readonly jobs = new Map<string, Job>();
+
     private readonly handlers: Record<string, Handler> = {
         // ---- history
         'history.status': async () => ({
@@ -171,6 +182,48 @@ class Objectmigrator extends utils.Adapter {
 
         // ---- "Prüfen" / "Schreiben" (06 §5)
         'plan.check': (msg: MigrationPlan) => this.runner!.check(msg),
+
+        // ---- long commands as a job: the admin answers sendTo with "timeout" after a while, so the tab
+        // starts the command and asks for the result until it is there
+        // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
+        'job.start': async (msg: { command?: string; message?: unknown }) => {
+            const command = String(msg?.command ?? '');
+            if (!['plan.check', 'plan.write'].includes(command)) {
+                throw new Error(`Command ${command} cannot run as a job`);
+            }
+            const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            const job: Job = { done: false, at: Date.now() };
+            this.jobs.set(id, job);
+            void Promise.resolve(this.handlers[command](msg.message))
+                .then(data => Object.assign(job, { done: true, data }))
+                .catch((e: Error) => {
+                    this.log.warn(`${command} failed: ${e.message}`);
+                    Object.assign(job, { done: true, error: e.message });
+                });
+            // forget old jobs
+            for (const [key, j] of this.jobs) {
+                if (Date.now() - j.at > 6 * 3600_000) {
+                    this.jobs.delete(key);
+                }
+            }
+            return { id };
+        },
+        // eslint-disable-next-line @typescript-eslint/require-await -- handlers return promises
+        'job.result': async (msg: { id?: string }) => {
+            const job = this.jobs.get(String(msg?.id));
+            if (!job) {
+                throw new Error('Unknown job - was the instance restarted?');
+            }
+            if (job.done) {
+                this.jobs.delete(String(msg.id));
+            }
+            return {
+                done: job.done,
+                data: job.data,
+                error: job.error,
+                seconds: Math.round((Date.now() - job.at) / 1000),
+            };
+        },
         'plan.write': (msg: MigrationPlan) => this.runner!.write(msg),
         'run.cancel': () => {
             this.runner!.cancel();

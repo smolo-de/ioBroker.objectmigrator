@@ -1352,7 +1352,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     const runCheck = async (current: EditorState = state, scope: string | undefined = checkScope): Promise<void> => {
         setCheckState({ loading: true });
         try {
-            const result = await socket.send<CheckResult>('plan.check', buildPlan(current, allObjects, scope));
+            const result = await socket.sendLong<CheckResult>('plan.check', buildPlan(current, allObjects, scope));
             setCheckState({ loading: false, result });
         } catch (e) {
             setCheckState({ loading: false, error: (e as Error).message });
@@ -1362,7 +1362,7 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     const runWrite = async (): Promise<void> => {
         setCheckState(c => ({ ...c, loading: true }));
         try {
-            const res = await socket.send<{ runId?: string; check: CheckResult }>(
+            const res = await socket.sendLong<{ runId?: string; check: CheckResult }>(
                 'plan.write',
                 buildPlan(state, allObjects, checkScope),
             );
