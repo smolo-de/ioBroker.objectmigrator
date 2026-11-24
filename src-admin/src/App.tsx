@@ -1371,6 +1371,9 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         });
     };
 
+    /** the selected node of the right tree (not a value) - default scope of "Prüfen" */
+    const defaultCheckScope = (): string | undefined =>
+        selected?.side === 'target' && right.nodes.get(selected.id)?.type !== 'state' ? selected.id : undefined;
     const runCheck = async (current: EditorState = state, scope: string | undefined = checkScope): Promise<void> => {
         setCheckState({ loading: true });
         try {
@@ -2272,8 +2275,11 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     variant="outlined"
                                     disabled={!state.links.length && !state.drafts.length}
                                     onClick={() => {
-                                        setCheckScope(undefined);
-                                        void runCheck(state, undefined);
+                                        // a node selected on the right: only this part is checked first -
+                                        // "alles" can still be chosen in the dialog
+                                        const scope = defaultCheckScope();
+                                        setCheckScope(scope);
+                                        void runCheck(state, scope);
                                     }}
                                 >
                                     {t('check')}
@@ -2284,8 +2290,11 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     color="warning"
                                     disabled={!state.links.length && !state.drafts.length}
                                     onClick={() => {
-                                        setCheckScope(undefined);
-                                        void runCheck(state, undefined);
+                                        // a node selected on the right: only this part is checked first -
+                                        // "alles" can still be chosen in the dialog
+                                        const scope = defaultCheckScope();
+                                        setCheckScope(scope);
+                                        void runCheck(state, scope);
                                     }}
                                 >
                                     ✎ {t('write')}
