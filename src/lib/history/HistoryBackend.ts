@@ -10,7 +10,11 @@ export interface HistoryBackend {
      * First/last ts and number of values per ID (undefined: no data) - one call for many IDs.
      * maxAgeMs > 0 allows a result of a previous call that is not older (default: always fresh).
      */
-    getRanges(ids: string[], maxAgeMs?: number): Promise<Record<string, DataRange | undefined>>;
+    getRanges(
+        ids: string[],
+        maxAgeMs?: number,
+        onEach?: (id: string, range: DataRange | undefined, index: number) => void,
+    ): Promise<Record<string, DataRange | undefined>>;
     /** Forgets cached ranges (after writing or a rollback) */
     invalidate?(): void;
     /** All raw values of an ID in the range (inclusive borders), sorted ascending */
@@ -107,8 +111,13 @@ export class HistoryAdapterBackend implements HistoryBackend {
      *
      * @param ids - state IDs
      * @param maxAgeMs - a cached result may be this old, 0 = always fresh
+     * @param onEach - called for every data point asked directly (log while it takes long)
      */
-    public async getRanges(ids: string[], maxAgeMs = 0): Promise<Record<string, DataRange | undefined>> {
+    public async getRanges(
+        ids: string[],
+        maxAgeMs = 0,
+        onEach?: (id: string, range: DataRange | undefined, index: number) => void,
+    ): Promise<Record<string, DataRange | undefined>> {
         const result: Record<string, DataRange | undefined> = {};
         if (!ids.length) {
             return result;
@@ -118,8 +127,9 @@ export class HistoryAdapterBackend implements HistoryBackend {
         const cached = maxAgeMs > 0 && this.stats && Date.now() - this.stats.at <= maxAgeMs;
         if (!cached && ids.length <= DIRECT_RANGES_MAX) {
             try {
-                for (const id of ids) {
+                for (const [index, id] of ids.entries()) {
                     result[id] = await this.directRange(id);
+                    onEach?.(id, result[id], index);
                 }
                 return result;
             } catch {

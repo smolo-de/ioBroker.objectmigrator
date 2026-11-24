@@ -604,13 +604,25 @@ export class MigrationRunner {
         if ((plan.tasks?.length ?? 0) > 0 && !result.historyAlive) {
             result.errors.push({ code: 'historyNotRunning', args: { instance: this.backend.instance } });
         }
+        const rangeIds = (plan.tasks ?? []).flatMap(t => [t.target, ...t.sources.map(s => s.id)]);
         const ranges =
             result.historyAlive && plan.tasks?.length
-                ? await this.backend.getRanges(
-                      plan.tasks.flatMap(t => [t.target, ...t.sources.map(s => s.id)]),
-                      options.fresh ? 0 : CHECK_RANGES_MAX_AGE,
+                ? await this.backend.getRanges(rangeIds, options.fresh ? 0 : CHECK_RANGES_MAX_AGE, (id, range, index) =>
+                      this.adapter.log.info(
+                          `Prüfen: Historie ${index + 1}/${rangeIds.length} ${id}: ${range?.count ?? 0} Einträge${
+                              range
+                                  ? ` (${new Date(range.start).toISOString().slice(0, 10)} – ${new Date(range.end).toISOString().slice(0, 10)})`
+                                  : ''
+                          }`,
+                      ),
                   )
                 : {};
+        if (result.historyAlive && rangeIds.length) {
+            const found = rangeIds.reduce((sum, id) => sum + (ranges[id]?.count ?? 0), 0);
+            this.adapter.log.info(
+                `Prüfen: Historie gelesen – ${rangeIds.length} Datenpunkte, ${found} Einträge gefunden`,
+            );
+        }
         const targets = new Set<string>();
         for (const task of plan.tasks ?? []) {
             if (targets.has(task.target)) {
@@ -632,6 +644,13 @@ export class MigrationRunner {
                     entry.sources.push({ id: s.id, range: ranges[s.id], estimate: estimate.perSource[s.id] });
                 }
                 entry.estimate = estimate.total;
+                this.adapter.log.info(
+                    `Prüfen: ${task.target} ← ${task.sources
+                        .map(s => `${s.id} (${ranges[s.id]?.count ?? 0})`)
+                        .join(
+                            ', ',
+                        )}: ca. ${estimate.total} Werte zu übertragen, am Ziel schon ${ranges[task.target]?.count ?? 0}`,
+                );
             }
             // retention check (HM-11): settings that will be active at the target
             const settings = result.settings.find(m => m.targetId === task.target);
