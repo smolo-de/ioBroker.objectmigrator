@@ -81,14 +81,15 @@ const ROUNDS: [number, string][] = [
  * @param props.ids - selected values (the values below a selected node included)
  * @param props.customKeys - adapter instances with settings at these values
  * @param props.disabled - a migration is running
+ * @param props.onClose - closes the window
  */
 export function HistoryTools(props: {
     socket: Connection;
     ids: string[];
     customKeys: string[];
     disabled?: boolean;
+    onClose: () => void;
 }): React.JSX.Element | null {
-    const [open, setOpen] = React.useState(false);
     const [busy, setBusy] = React.useState<string>();
     const [error, setError] = React.useState<string>();
     const [counts, setCounts] = React.useState<Record<string, Range | undefined>>();
@@ -216,14 +217,24 @@ export function HistoryTools(props: {
     const periodText = `${from ? fmtDate(dateTs(from)!) : t('htFromFirst')} – ${to ? fmtDate(dateTs(to)!) : t('htToNow')}`;
 
     return (
-        <div className="om-panel om-history-tools">
-            <h4
-                className="om-clickable"
-                onClick={() => setOpen(!open)}
-            >
-                {open ? '▾' : '▸'} 🧹 {t('htTitle')} <span className="om-chip">{props.ids.length}</span>
-            </h4>
-            {open && (
+        <Dialog
+            open
+            fullWidth
+            maxWidth="md"
+            onClose={() => !busy && props.onClose()}
+        >
+            <DialogTitle>
+                🧹 {t('htTitle')} <span className="om-chip">{t('htValues', { n: props.ids.length })}</span>
+            </DialogTitle>
+            <DialogContent className="om-history-tools">
+                <details className="om-ht-ids">
+                    <summary>
+                        {props.ids.length === 1 ? props.ids[0] : t('htValuesList', { n: props.ids.length })}
+                    </summary>
+                    {props.ids.map(id => (
+                        <div key={id}>{id}</div>
+                    ))}
+                </details>
                 <>
                     {busy && (
                         <div>
@@ -581,7 +592,15 @@ export function HistoryTools(props: {
                         </Button>
                     </div>
                 </>
-            )}
+            </DialogContent>
+            <DialogActions>
+                <Button
+                    disabled={!!busy}
+                    onClick={props.onClose}
+                >
+                    {t('close')}
+                </Button>
+            </DialogActions>
 
             {confirm && (
                 <Dialog
@@ -618,6 +637,6 @@ export function HistoryTools(props: {
                     </DialogActions>
                 </Dialog>
             )}
-        </div>
+        </Dialog>
     );
 }

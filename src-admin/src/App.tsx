@@ -652,6 +652,8 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
     };
     /** "ask": the links waiting for the answer */
     const [askLink, setAskLink] = React.useState<{ links: Link[]; select?: string }>();
+    /** window "Historie & Adapter" (HM-20..23) for the selected values */
+    const [toolsOpen, setToolsOpen] = React.useState(false);
     /** object whose original adapter settings are shown in the overlay (admin page in a frame) */
     const [customsOf, setCustomsOf] = React.useState<string>();
     React.useEffect(() => {
@@ -1666,6 +1668,16 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                     {side === 'source' && sourceSelection.size > 1 && (
                         <span className="om-chip">{t('selected', { n: sourceSelection.size })}</span>
                     )}
+                    {selected?.side === side && toolIds.length > 0 && (
+                        <Tooltip title={t('htOpenHelp')}>
+                            <Button
+                                size="small"
+                                onClick={() => setToolsOpen(true)}
+                            >
+                                🧹 {t('htValues', { n: toolIds.length })}
+                            </Button>
+                        </Tooltip>
+                    )}
                     {side === 'target' && targetSelection.size > 1 && (
                         <span
                             className="om-chip"
@@ -2211,12 +2223,6 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     <p>{t('help')}</p>
                                 </div>
                             )}
-                            <HistoryTools
-                                socket={socket}
-                                ids={toolIds}
-                                customKeys={toolCustomKeys}
-                                disabled={running}
-                            />
                         </div>
                     </div>
 
@@ -2548,6 +2554,15 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                             })
                             .catch(e => setCreateMode({ error: (e as Error).message }))
                     }
+                />
+            )}
+            {toolsOpen && toolIds.length > 0 && (
+                <HistoryTools
+                    socket={socket}
+                    ids={toolIds}
+                    customKeys={toolCustomKeys}
+                    disabled={running}
+                    onClose={() => setToolsOpen(false)}
                 />
             )}
             {customsOf && (

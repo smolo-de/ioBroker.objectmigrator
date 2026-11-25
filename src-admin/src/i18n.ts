@@ -268,6 +268,10 @@ const de = {
     filterClear: 'Filter leeren (Esc)',
     dropLinkedCreated: '{linked} verknüpft, {created} fehlende Werte neu angelegt – Rückgängig mit Strg+Z',
     htTitle: 'Historie & Adapter',
+    htValues: '{n} Werte',
+    htValuesList: 'die {n} markierten Werte (aufklappen)',
+    htOpenHelp:
+        'Historie & Adapter der markierten Werte (Knoten: alle Werte darunter): zählen, löschen, ausdünnen, Adapter deaktivieren, Sicherungen',
     htCount: 'Einträge zählen',
     htSum: 'Summe',
     htPeriod: 'Zeitraum (für Löschen und Ausdünnen)',
@@ -720,6 +724,10 @@ const en: Texts = {
     filterClear: 'Clear the filter (Esc)',
     dropLinkedCreated: '{linked} linked, {created} missing values created – undo with Ctrl+Z',
     htTitle: 'History & adapters',
+    htValues: '{n} values',
+    htValuesList: 'the {n} selected values (expand)',
+    htOpenHelp:
+        'History & adapters of the selected values (node: all values below): count, delete, thin, switch adapters off, backups',
     htCount: 'Count entries',
     htSum: 'Sum',
     htPeriod: 'Period (for delete and thin)',
