@@ -460,6 +460,7 @@ class Objectmigrator extends utils.Adapter {
                     'history.thin',
                     'history.restore',
                     'history.restoreData',
+                    'history.count',
                 ].includes(command)
             ) {
                 throw new Error(`Command ${command} cannot run as a job`);

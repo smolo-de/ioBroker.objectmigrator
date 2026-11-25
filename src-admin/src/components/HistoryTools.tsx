@@ -141,7 +141,7 @@ export function HistoryTools(props: {
     };
     const count = (): void =>
         void run(t('htCount'), () =>
-            props.socket.send<Record<string, Range | undefined>>('history.count', { ids: props.ids }),
+            props.socket.sendLong<Record<string, Range | undefined>>('history.count', { ids: props.ids }),
         ).then(r => r && setCounts(r));
     const doPreview = (kind: 'delete' | 'thin'): void =>
         void run(t('htPreview'), () =>
