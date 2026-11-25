@@ -865,3 +865,26 @@ body,
     border: 1px dashed #e57373;
     border-radius: 4px;
 }
+
+/* favorites (ME-22): the star of a row shows on hover, a favorite always */
+.om-fav {
+    width: 18px;
+    text-align: center;
+    cursor: pointer;
+    color: #f5b301;
+    visibility: hidden;
+}
+.om-row:hover .om-fav,
+.om-fav.om-fav-on {
+    visibility: visible;
+}
+.om-fav-switch {
+    cursor: pointer;
+    font-size: 20px;
+    color: #f5b301;
+    padding: 0 4px;
+    user-select: none;
+}
+.om-fav-switch:not(.om-fav-on) {
+    opacity: 0.6;
+}

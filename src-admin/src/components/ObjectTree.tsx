@@ -35,6 +35,10 @@ export interface ObjectTreeProps {
     selectedId?: string;
     /** Multi selection (Ctrl/Shift click) */
     selectedIds?: Set<string>;
+    /** favorite nodes (ME-22) */
+    favorites?: Set<string>;
+    /** marks a node as favorite or not */
+    onFavorite?: (id: string) => void;
     /** Links per ID (also counted at collapsed parents) */
     linkCount: Map<string, number>;
     /** Counterparts of the selection */
@@ -303,6 +307,18 @@ export function ObjectTree(props: ObjectTreeProps): React.JSX.Element {
                                     </span>
                                 ))}
                             <span className="om-spacer" />
+                            {!isState && props.onFavorite && (
+                                <span
+                                    className={`om-fav ${props.favorites?.has(node.id) ? 'om-fav-on' : ''}`}
+                                    title={props.favorites?.has(node.id) ? t('favoriteRemove') : t('favoriteAdd')}
+                                    onClick={e => {
+                                        e.stopPropagation();
+                                        props.onFavorite!(node.id);
+                                    }}
+                                >
+                                    {props.favorites?.has(node.id) ? '★' : '☆'}
+                                </span>
+                            )}
                             {!isState && row.depth > 0 && !node.draft && (
                                 <span
                                     className="om-root-btn"

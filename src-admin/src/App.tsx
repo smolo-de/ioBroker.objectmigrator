@@ -9,6 +9,8 @@ import {
     DialogContentText,
     DialogTitle,
     FormControlLabel,
+    IconButton,
+    InputAdornment,
     LinearProgress,
     MenuItem,
     Select,
@@ -189,11 +191,50 @@ function useTreeSide(
     drafts: DraftObject[],
     session?: TreeSession,
     whole?: WholeTree,
+    favoritesKey = '',
 ) {
     const [objects, setObjects] = React.useState<Record<string, ObjInfo>>({});
     const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
     const [filter, setFilter] = React.useState(session?.filter ?? '');
     const [onlySettings, setOnlySettings] = React.useState(session?.onlySettings ?? false);
+    /** favorite nodes (ME-22) - remembered per browser and tree side */
+    const [favorites, setFavorites] = React.useState<Set<string>>(() => {
+        try {
+            return new Set(JSON.parse(window.localStorage.getItem(favoritesKey) ?? '[]') as string[]);
+        } catch {
+            return new Set();
+        }
+    });
+    const [onlyFavorites, setOnlyFavorites] = React.useState<boolean>(() => {
+        try {
+            return window.localStorage.getItem(`${favoritesKey}.only`) === '1';
+        } catch {
+            return false;
+        }
+    });
+    const toggleFavorite = (id: string): void =>
+        setFavorites(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
+            }
+            try {
+                window.localStorage.setItem(favoritesKey, JSON.stringify([...next]));
+            } catch {
+                // only not remembered
+            }
+            return next;
+        });
+    const switchOnlyFavorites = (on: boolean): void => {
+        setOnlyFavorites(on);
+        try {
+            window.localStorage.setItem(`${favoritesKey}.only`, on ? '1' : '0');
+        } catch {
+            // only not remembered
+        }
+    };
     const [scroll, setScroll] = React.useState(0);
     const [loading, setLoading] = React.useState(false);
     const [reloadCount, setReloadCount] = React.useState(0);
@@ -360,6 +401,21 @@ function useTreeSide(
         if (!root) {
             return [];
         }
+        // only the favorites (ME-22): each one as a top row with everything below it, expandable as usual;
+        // a favorite below another one is shown there
+        if (onlyFavorites && favorites.size) {
+            const byId = new Map<string, TreeNode>();
+            const walk = (n: TreeNode): void => {
+                byId.set(n.id, n);
+                n.children.forEach(walk);
+            };
+            walk(tree);
+            const tops = [...favorites]
+                .filter(id => byId.has(id))
+                .filter(id => ![...favorites].some(o => o !== id && id.startsWith(`${o}.`)))
+                .sort();
+            return tops.flatMap(id => flatten(byId.get(id)!, new Set([...expanded, id]), fn));
+        }
         if (!all) {
             return flatten(tree, expanded, fn);
         }
@@ -367,7 +423,7 @@ function useTreeSide(
         return flatten(tree, new Set([...expanded, '']), fn)
             .slice(1)
             .map(r => ({ ...r, depth: r.depth - 1 }));
-    }, [tree, expanded, filter, onlySettings, root, all]);
+    }, [tree, expanded, filter, onlySettings, root, all, onlyFavorites, favorites]);
     // scroll position of the last visit, as soon as the rows are there - or the object to reveal
     React.useLayoutEffect(() => {
         const el = scrollRef.current;
@@ -423,6 +479,10 @@ function useTreeSide(
         setFilter,
         onlySettings,
         setOnlySettings,
+        favorites,
+        toggleFavorite,
+        onlyFavorites,
+        switchOnlyFavorites,
         scroll,
         scrollRef,
         onScroll: () => setScroll(scrollRef.current?.scrollTop ?? 0),
@@ -647,8 +707,15 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
         () => ({ namespaces: rootChoices, linked: [...linkedSources] }),
         [rootChoices, linkedSources],
     );
-    const left = useTreeSide(socket, state.sourceRoot, [], session?.left, wholeTree);
-    const right = useTreeSide(socket, state.targetRoot, state.drafts, session?.right);
+    const left = useTreeSide(socket, state.sourceRoot, [], session?.left, wholeTree, 'objectmigrator.favorites.source');
+    const right = useTreeSide(
+        socket,
+        state.targetRoot,
+        state.drafts,
+        session?.right,
+        undefined,
+        'objectmigrator.favorites.target',
+    );
 
     const fail = (e: unknown): void => setToast({ text: (e as Error).message ?? String(e), severity: 'error' });
 
@@ -1243,6 +1310,35 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                 const links = source.type === 'state' ? [] : autoLinks(source, target, language());
                 if (links.length) {
                     linkSources(links);
+                    // the values without a counterpart are created below the target node (EM-07) -
+                    // values that are linked somewhere already stay where they are
+                    const matched = new Set(links.map(l => l.sourceId));
+                    const missing: string[] = [];
+                    const collect = (n: typeof source): void => {
+                        if (n.type === 'state') {
+                            if (!matched.has(n.id) && !linkedSources.has(n.id)) {
+                                missing.push(n.id);
+                            }
+                            return;
+                        }
+                        n.children.forEach(collect);
+                    };
+                    collect(source);
+                    if (missing.length && target.id.startsWith('alias.')) {
+                        void mirror(source.id, target.id, target.id, missing)
+                            .then(res => {
+                                if (res.error) {
+                                    fail(new Error(res.error));
+                                    return;
+                                }
+                                setToast({
+                                    text: t('dropLinkedCreated', { linked: links.length, created: res.values }),
+                                    severity: 'success',
+                                });
+                            })
+                            .catch(fail);
+                        right.setExpanded(prev => new Set([...prev, target.id]));
+                    }
                 } else if (target.id.startsWith('alias.')) {
                     // nothing matches: mirror the dragged node/state below the target node (EM-07)
                     const isState = source.type === 'state';
@@ -1636,7 +1732,32 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                         label={t('filter')}
                         value={tree.filter}
                         onChange={e => tree.setFilter(e.target.value)}
+                        onKeyDown={e => e.key === 'Escape' && tree.setFilter('')}
+                        slotProps={{
+                            input: {
+                                endAdornment: tree.filter ? (
+                                    <InputAdornment position="end">
+                                        <IconButton
+                                            size="small"
+                                            edge="end"
+                                            title={t('filterClear')}
+                                            onClick={() => tree.setFilter('')}
+                                        >
+                                            ✕
+                                        </IconButton>
+                                    </InputAdornment>
+                                ) : undefined,
+                            },
+                        }}
                     />
+                    <Tooltip title={tree.favorites.size ? t('onlyFavorites') : t('noFavorites')}>
+                        <span
+                            className={`om-fav-switch ${tree.onlyFavorites && tree.favorites.size ? 'om-fav-on' : ''}`}
+                            onClick={() => tree.favorites.size && tree.switchOnlyFavorites(!tree.onlyFavorites)}
+                        >
+                            {tree.onlyFavorites && tree.favorites.size ? '★' : '☆'}
+                        </span>
+                    </Tooltip>
                     {side === 'source' && (
                         <Tooltip title={t('onlySettings')}>
                             <FormControlLabel
@@ -1847,6 +1968,8 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     onScroll={left.onScroll}
                                     selectedId={selected?.side === 'source' ? selected.id : undefined}
                                     selectedIds={sourceSelection}
+                                    favorites={left.favorites}
+                                    onFavorite={left.toggleFavorite}
                                     linkCount={leftCounts}
                                     highlight={highlight}
                                     instances={instances}
@@ -1961,6 +2084,8 @@ export function App(props: { socket: Connection; dark: boolean }): React.JSX.Ele
                                     onScroll={right.onScroll}
                                     selectedId={selected?.side === 'target' ? selected.id : undefined}
                                     selectedIds={targetSelection}
+                                    favorites={right.favorites}
+                                    onFavorite={right.toggleFavorite}
                                     linkCount={rightCounts}
                                     highlight={highlight}
                                     instances={instances}
